@@ -1,0 +1,82 @@
+[project]
+name = "small-object-detection"
+version = "0.1.0"
+description = "Small-object detection in aerial images: does tiled or higher-resolution inference help?"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "ultralytics>=8.4.0",
+    "torch>=2.6",
+    "torchvision>=0.21",
+    "pycocotools>=2.0.10",
+    "opencv-python-headless>=4.10",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pillow>=10.3",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    "jupyter>=1.1",
+    "ipykernel>=6.29",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+    "mypy>=1.15",
+    "pre-commit>=4.0",
+    "types-pyyaml>=6.0",
+    "types-requests>=2.32",
+    "pandas-stubs>=2.2",
+    "notebook>=7.2",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "C4",  # comprehensions
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line length handled by formatter
+    "B905",  # zip strict= (notebook convenience)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*" = [
+    "E402",  # imports after config cells
+    "T201",  # print is fine in notebooks
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["small_object_detection"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+exclude = [
+    "\\.venv",
+    "data",
+    "runs",
+    "notebooks",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

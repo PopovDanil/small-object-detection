@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project: large data files stay local, the folder itself is tracked via .gitkeep
+data/*
+!data/.gitkeep
+
+# Project: training/inference artifacts and model weights
+runs/
+*.pt
+*.pth
