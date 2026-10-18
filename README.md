@@ -63,6 +63,15 @@ Class mapping: VisDrone 1–10 → YOLO 0–9
 VisDrone classes 0 (ignored regions) and 11 (don't care) are dropped from training
 targets and respected by the evaluator. Images are never resampled on disk.
 
+### Exploratory data analysis
+
+[notebooks/eda.ipynb](notebooks/eda.ipynb) verifies whether the official splits
+are stratified (class and object-size distributions via total variation distance)
+and displays sample photos. Key finding: they are only approximately stratified —
+test-dev is tiny-heavy (36.4 % of objects < 16² px vs 26.0 % in train) and val is
+enriched in `people`/`motor`, which is why val is used **only** for checkpoint
+selection and all reported scores use test-dev.
+
 ## Running the baseline (stage 1)
 
 ```bash
@@ -72,20 +81,44 @@ uv run jupyter nbconvert --to notebook --execute notebooks/baseline.ipynb \
 
 or open it interactively with `uv run jupyter lab notebooks/baseline.ipynb`.
 
-The notebook downloads the data, converts annotations, fine-tunes both models
-(short stage-1 run, `EPOCHS=5`), and writes baseline scores to
-`runs/baseline/baseline_scores_val_640.csv`. Training artifacts land in
-`runs/baseline/<model>_s640/` (git-ignored).
+The notebook downloads the data, converts annotations, scores the vanilla
+(COCO-pretrained) models, fine-tunes both models (short stage-1 run, `EPOCHS=5`),
+and writes baseline scores on the **test-dev** split to
+`runs/baseline/baseline_scores_vanilla_test_640.csv` and
+`runs/baseline/baseline_scores_test_640.csv` (validation is used only for
+checkpoint/hyperparameter selection). Training artifacts land in
+`runs/baseline/<model>_s640/` (git-ignored). See
+[docs/baseline_results.md](docs/baseline_results.md) for the full baseline report.
 
 ### Shared evaluator
 
-Every experiment must be scored with the notebook's
-`evaluate_split(labels, images, model, imgsz=..., conf=...)`, which returns:
+Every experiment must be scored with
+`evaluate_split(labels, images, model, imgsz=..., conf=...)` from
+[`src/evaluation/metrics.py`](src/evaluation/metrics.py), which returns:
 mAP50–95, mAP50 (conf 0.001), recall@IoU0.5/conf0.25, tiny (<16² px) AP + recall,
 COCO small/medium/large AP + recall with per-group object counts, and mean/p95
 runtime per original image (batch 1, warm-up, CUDA sync). All metrics are computed
-in original-image coordinates; ignored regions are respected. Do not introduce a
-second evaluator — extend this one.
+in original-image coordinates; ignored regions are respected. Fine-tuned models
+use the identity class mapping; zero-shot COCO models use `coco_class_map`. Do not
+introduce a second evaluator — extend this one.
+
+## Running the full fine-tune (stage 2a)
+
+[notebooks/finetune.ipynb](notebooks/finetune.ipynb) implements the proposal's
+full training protocol (max 50 epochs, `patience=15`, cosine LR, `close_mosaic=10`,
+all layers trainable) with one shared config for both models and a short pilot
+that fixes the effective batch size. It writes validation-selected checkpoints to
+`runs/finetune/<model>_s640/weights/best.pt`. Expect several hours per model; run
+it on a GPU/Kaggle session. Set `VISDRONE_DATA` if the prepared `data/` tree lives
+elsewhere. See [docs/finetuning.md](docs/finetuning.md).
+
+## Tiled inference (stage 2b)
+
+[notebooks/tiling.ipynb](notebooks/tiling.ipynb) scores native-resolution
+640×640 tiled inference (20 % overlap, plus a 0/20/40 % sweep for `yolo26m`) with
+the shared evaluator via `evaluate_split(..., inference="tiled")`. Point its
+`WEIGHTS` dict at any checkpoints (e.g. `runs/finetune/...`). See
+[docs/tiling_results.md](docs/tiling_results.md).
 
 ### Conventions
 
@@ -94,5 +127,5 @@ second evaluator — extend this one.
   before results are examined.
 * One shared training YAML (`data/visdrone.yaml`) for both models; the only
   difference between runs is model size and its pretrained weights.
-* Test-dev is evaluated only for the final six experiments, never during
-  development.
+* Validation is used only for checkpoint/hyperparameter selection; all reported
+  scores are computed on test-dev with the shared evaluator.
