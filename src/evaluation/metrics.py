@@ -13,11 +13,16 @@ by the proposal:
 * ``ap_small|medium|large`` / ``recall_small|medium|large`` / ``n_*`` — COCO
   size groups (small < 32^2, 32^2 <= medium < 96^2, large >= 96^2) with object
   counts;
+* ``*_small_only`` — 16^2 <= area < 32^2, so that tiny / small_only / medium /
+  large are **disjoint** (COCO ``small`` contains ``tiny``);
+* ``ap50_<group>`` — AP at IoU 0.50 per size group (a 2 px shift already drops a
+  10 px box below IoU 0.75, so AP50-95 alone understates detection of tiny boxes);
 * ``runtime_mean_ms`` / ``runtime_p95_ms`` — mean and p95 ms per original
   image, batch size 1, with warm-up and CUDA synchronization.
 
 All metrics are computed in original-image coordinates and ignored/don't-care
-regions are respected. Results apply to this protocol and are not official
+regions are respected. Every condition keeps at most ``MAX_DET`` detections per
+original image (tiled: after merging), so crowded images are capped identically. Results apply to this protocol and are not official
 leaderboard scores.
 """
 
@@ -59,6 +64,11 @@ MEDIUM_AREA = 96**2  # COCO medium upper bound
 IGNORE_IOU_THR = 0.5  # drop predictions overlapping ignored regions at this IoU
 TILE_SIZE = 640  # tiling: native-resolution crops of 640x640
 TILE_OVERLAP = 0.20  # tiling: default 20% overlap between neighbouring crops
+# Detections kept per original image in every condition (and COCOeval maxDets).
+# Ultralytics' default max_det=300 is per forward pass: it capped full-image
+# inference at 300/image but tiling at 300/tile, i.e. unequally. VisDrone images
+# hold up to ~900 objects, so one shared cap above that is used everywhere.
+MAX_DET = 1000
 
 CLASSES = (
     "pedestrian",
@@ -92,8 +102,11 @@ AREA_RANGES = [
     ("small", 0.0, float(SMALL_AREA)),
     ("medium", float(SMALL_AREA), float(MEDIUM_AREA)),
     ("large", float(MEDIUM_AREA), 1e10),
+    ("small_only", float(TINY_AREA), float(SMALL_AREA)),
 ]
-SIZE_GROUPS = ("all", "tiny", "small", "medium", "large")
+SIZE_GROUPS = ("all", "tiny", "small", "medium", "large", "small_only")
+# Disjoint partition of all objects by area, used for the per-size result tables.
+DISJOINT_SIZE_GROUPS = ("tiny", "small_only", "medium", "large")
 
 
 # --------------------------------------------------------------------------- #
@@ -238,6 +251,7 @@ def predict_images(
             imgsz=imgsz,
             conf=conf,
             iou=iou,
+            max_det=MAX_DET,
             device=device,
             verbose=False,
         )
@@ -267,6 +281,7 @@ def benchmark_runtime(
             imgsz=imgsz,
             conf=conf,
             iou=iou,
+            max_det=MAX_DET,
             device=device,
             verbose=False,
         )
@@ -353,6 +368,7 @@ def predict_image_tiled(
             imgsz=tile,
             conf=conf,
             iou=iou,
+            max_det=MAX_DET,
             device=device,
             verbose=False,
         )
@@ -368,7 +384,9 @@ def predict_image_tiled(
     merged = np.concatenate(tile_preds, axis=0)
     merged[:, [0, 2]] = np.clip(merged[:, [0, 2]], 0, width)
     merged[:, [1, 3]] = np.clip(merged[:, [1, 3]], 0, height)
-    return merge_tile_detections(merged, nms_iou)
+    merged = merge_tile_detections(merged, nms_iou)
+    # Same per-image cap as full-image inference (merge output is score-sorted).
+    return merged[:MAX_DET]
 
 
 def predict_images_tiled(
@@ -501,7 +519,7 @@ def compute_map50_95(
     gt: dict[str, Any],
     preds_by_image: dict[str, np.ndarray],
 ) -> dict[str, float]:
-    """mAP50-95, mAP50 and AP50-95 per COCO/tiny size group via pycocotools."""
+    """mAP50-95, mAP50, and AP50-95 / AP50 per size group via pycocotools."""
     coco_gt = COCO()
     coco_gt.dataset = gt
     coco_gt.createIndex()
@@ -523,7 +541,7 @@ def compute_map50_95(
     evaluator = COCOeval(coco_gt, coco_dt, iouType="bbox")
     evaluator.params.areaRng = [[lo, hi] for _, lo, hi in AREA_RANGES]
     evaluator.params.areaRngLbl = [label for label, _, _ in AREA_RANGES]
-    evaluator.params.maxDets = [1, 10, 300]
+    evaluator.params.maxDets = [1, 10, MAX_DET]
     evaluator.evaluate()
     evaluator.accumulate()
 
@@ -534,6 +552,10 @@ def compute_map50_95(
         values = values[values > -1]
         key = "map50_95" if label == "all" else f"ap_{label}"
         metrics[key] = float(values.mean()) if values.size else 0.0
+        if label != "all":  # AP at IoU 0.50 per size group
+            values50 = precision[0, :, :, area_index, -1]
+            values50 = values50[values50 > -1]
+            metrics[f"ap50_{label}"] = float(values50.mean()) if values50.size else 0.0
 
     # mAP50 (IoU=0.50), from the same precision array, IoU thresholds are
     # ordered 0.50:0.05:0.95 (the summarize() path is capped at maxDets=20).
@@ -570,6 +592,7 @@ def compute_recall(
             "small": areas < SMALL_AREA,
             "medium": (areas >= SMALL_AREA) & (areas < MEDIUM_AREA),
             "large": areas >= MEDIUM_AREA,
+            "small_only": (areas >= TINY_AREA) & (areas < SMALL_AREA),
         }
 
         preds = preds_by_image.get(image_path.name, np.zeros((0, 6)))

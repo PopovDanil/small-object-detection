@@ -22,6 +22,13 @@ overlap sweep) will be compared against.
 > These numbers follow our protocol and are **not** official VisDrone
 > leaderboard scores.
 
+> **Protocol note (later revision).** These stage-1 numbers were produced before two
+> evaluator fixes used for the final results: (1) a shared cap of `MAX_DET = 1000`
+> detections per original image — here Ultralytics' default `max_det=300` applied per
+> forward pass, i.e. per image for full-image inference but per tile for tiling, which
+> favours tiling on crowded images; (2) the disjoint `small_only` (16²–32² px) group and
+> AP50 per size group. Final comparisons: `notebooks/results.ipynb`.
+
 ## 1. Environment
 
 | Item | Value |

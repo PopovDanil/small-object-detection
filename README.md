@@ -96,9 +96,14 @@ Every experiment must be scored with
 `evaluate_split(labels, images, model, imgsz=..., conf=...)` from
 [`src/evaluation/metrics.py`](src/evaluation/metrics.py), which returns:
 mAP50–95, mAP50 (conf 0.001), recall@IoU0.5/conf0.25, tiny (<16² px) AP + recall,
-COCO small/medium/large AP + recall with per-group object counts, and mean/p95
-runtime per original image (batch 1, warm-up, CUDA sync). All metrics are computed
-in original-image coordinates; ignored regions are respected. Fine-tuned models
+COCO small/medium/large AP + recall with per-group object counts, the disjoint
+`small_only` group (16²–32² px, so tiny / small_only / medium / large partition all
+objects), AP50 per size group (`ap50_<group>`), and mean/p95 runtime per original
+image (batch 1, warm-up, CUDA sync). All metrics are computed in original-image
+coordinates; ignored regions are respected. Every condition keeps at most
+`MAX_DET = 1000` detections per original image (tiled: after merging); before this,
+Ultralytics' default `max_det=300` capped full-image inference per image but tiling
+per tile, which favoured tiling on crowded images. Fine-tuned models
 use the identity class mapping; zero-shot COCO models use `coco_class_map`. Do not
 introduce a second evaluator — extend this one.
 
@@ -110,28 +115,40 @@ all layers trainable) with one shared config for both models and a short pilot
 that fixes the effective batch size. It writes validation-selected checkpoints to
 `runs/finetune/<model>_s640/weights/best.pt`. Expect several hours per model; run
 it on a GPU/Kaggle session. Set `VISDRONE_DATA` if the prepared `data/` tree lives
-elsewhere. See [docs/finetuning.md](docs/finetuning.md).
+elsewhere. Env vars select the run: `FT_MODELS` (e.g. `yolo26m`), `FT_DEVICE`
+(GPU index), `FT_BATCH` (pin the batch, skips the pilot), `FT_WORKERS`.
 
-## Tiled inference (stage 2b)
+On a 2-GPU Kaggle session (2× T4), `bash scripts/kaggle_finetune.sh` installs the
+pinned dependencies, prepares the data with
+[`scripts/prepare_data.py`](scripts/prepare_data.py) (only the data cells of the
+baseline notebook), runs the pilot once and then trains `yolo26m` on GPU 0 and
+`yolo26x` on GPU 1 in parallel with the same batch. See
+[docs/finetuning.md](docs/finetuning.md).
 
-[notebooks/tiling.ipynb](notebooks/tiling.ipynb) scores native-resolution
-640×640 tiled inference (20 % overlap, plus a 0/20/40 % sweep for `yolo26m`) with
-the shared evaluator via `evaluate_split(..., inference="tiled")`. Point its
-`WEIGHTS` dict at any checkpoints (e.g. `runs/finetune/...`). See
+## Final evaluation (stage 2b): 640 / 1280 / tiling
+
+All three inference conditions are scored on the **same checkpoints**. `EVAL_STAGE`
+(env var) selects them: `finetune` (default, `runs/finetune/`) or `baseline`
+(stage-1, `runs/baseline/`). Run, in order, with the same `EVAL_STAGE`:
+
+1. [notebooks/highres.ipynb](notebooks/highres.ipynb) — 640 and 1280 full-image
+   (`evaluate_split(..., imgsz=640|1280)`) → `runs/highres/<stage>/`. Its appendix
+   scores every condition per native image size (960×540, 1360×765, 1920×1080; images
+   with a long side < 1280 are upscaled at 1280, not enriched) via the standalone
+   [`src/evaluation/native_size.py`](src/evaluation/native_size.py); `RUN_APPENDIX=0`
+   skips it.
+2. [notebooks/tiling.ipynb](notebooks/tiling.ipynb) — 640×640 native-resolution tiles
+   with 20 % overlap, the 0/20/40 % overlap sensitivity sweep for `yolo26m` and
+   failure cases (`evaluate_split(..., inference="tiled")`) → `runs/tiling/<stage>/`.
+3. [notebooks/results.ipynb](notebooks/results.ipynb) — no inference; merges the CSVs
+   into the final tables → `runs/results/<stage>/` (CSV, `results_tables.md`, PNG):
+   overall metrics + runtime with Δ vs 640, per disjoint object-size group (AP50–95,
+   AP50, recall, counts), yolo26x − yolo26m per condition, overlap sweep.
+
+On Kaggle: `FINETUNE_SRC=<path to runs/finetune of the training output> bash
+scripts/kaggle_eval.sh` runs all three. Stage-1 reports:
+[docs/baseline_results.md](docs/baseline_results.md),
 [docs/tiling_results.md](docs/tiling_results.md).
-
-## Higher-resolution inference (stage 2c)
-
-[notebooks/highres.ipynb](notebooks/highres.ipynb) scores 1280 full-image inference
-with the shared evaluator via `evaluate_split(..., imgsz=1280)` and merges
-640 / 1280 / tiling into one comparison table. Results land in `runs/highres/`. Point
-its `WEIGHTS` dict at the same checkpoints as the baseline and tiling runs.
-
-Its appendix scores every condition separately per native image size (960×540,
-1360×765, 1920×1080 — images with a long side < 1280 are upscaled at 1280, not
-enriched) via the standalone
-[`src/evaluation/native_size.py`](src/evaluation/native_size.py). This is a
-supplementary table only; the main evaluator is unchanged.
 
 ### Conventions
 

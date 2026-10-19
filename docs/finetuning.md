@@ -72,7 +72,36 @@ Set `BATCH_OVERRIDE` in the notebook to skip the pilot and pin a known batch
 
 ## 4. How to run
 
-### Kaggle (recommended; the proposal targets T4/P100-class sessions)
+### Kaggle, 2× T4 (used for the reported runs)
+
+Both models train **in parallel**, one per GPU, with the same shared config and the
+same batch (fixed once by the pilot):
+
+```bash
+git clone https://github.com/PopovDanil/small-object-detection.git
+cd small-object-detection
+bash scripts/kaggle_finetune.sh
+```
+
+Session settings: *Accelerator = GPU T4 x2*, *Internet = On*, run as **Save & Run All
+(commit)** so training survives closing the browser (12 h session limit). The script:
+
+1. installs the versions pinned in `uv.lock` (`ultralytics==8.4.175`,
+   `pycocotools==2.0.11`);
+2. prepares the data with [`scripts/prepare_data.py`](../scripts/prepare_data.py),
+   which executes only the data cells of the baseline notebook (download, YOLO
+   conversion, `visdrone.yaml`, checks) — no vanilla scoring, no stage-1 training;
+3. runs the pilot once on GPU 0 (`FT_MODELS=""`) unless `FT_BATCH` is set;
+4. executes `notebooks/finetune.ipynb` twice in parallel —
+   `FT_MODELS=yolo26m FT_DEVICE=0` and `FT_MODELS=yolo26x FT_DEVICE=1` — with
+   `FT_WORKERS=2` each (the 4 Kaggle CPUs are shared), printing the last epoch of each
+   run every 10 minutes. Executed notebooks and logs land in `runs/finetune/`;
+   `training_config.json` and `finetune_summary.csv` are merged across the two runs.
+
+The notebook reads these env vars (defaults reproduce a single sequential run):
+`FT_MODELS` (comma list; `""` = pilot only), `FT_DEVICE`, `FT_BATCH`, `FT_WORKERS`.
+
+### Kaggle, single GPU
 
 1. Prepare the dataset once with [notebooks/baseline.ipynb](../notebooks/baseline.ipynb)
    (or upload the prepared `data/` tree as a Kaggle Dataset).
@@ -116,18 +145,10 @@ All `runs/` artifacts are git-ignored.
 
 ## 6. Evaluating the fine-tuned checkpoints
 
-The fine-tuned models use the identity 10-class mapping (`class_map=None`).
-Point the evaluation notebook at the new weights by editing its `WEIGHTS` dict:
-
-```python
-# notebooks/tiling.ipynb
-WEIGHTS = {
-    "yolo26m": ROOT / "runs" / "finetune" / "yolo26m_s640" / "weights" / "best.pt",
-    "yolo26x": ROOT / "runs" / "finetune" / "yolo26x_s640" / "weights" / "best.pt",
-}
-```
-
-or score directly with the shared evaluator
+The fine-tuned models use the identity 10-class mapping (`class_map=None`). The
+evaluation notebooks load `runs/<EVAL_STAGE>/<model>_s640/weights/best.pt` with
+`EVAL_STAGE=finetune` by default; run `highres.ipynb` → `tiling.ipynb` →
+`results.ipynb` (or `scripts/kaggle_eval.sh`, see the README), or score directly with the shared evaluator
 ([`src/evaluation/metrics.py`](../src/evaluation/metrics.py)):
 
 ```python

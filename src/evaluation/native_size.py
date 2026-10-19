@@ -25,6 +25,7 @@ from ultralytics import YOLO
 
 from src.evaluation.metrics import (
     CONF_EVAL,
+    DISJOINT_SIZE_GROUPS,
     IGNORE_DIR,
     TILE_OVERLAP,
     TILE_SIZE,
@@ -45,18 +46,13 @@ DEFAULT_CONDITIONS: dict[str, dict[str, Any]] = {
 
 RUNTIME_PER_GROUP = 60  # timed images per native-size group (first 10 are warm-up)
 
+# Overall metrics, then the disjoint object-size groups (tiny / small_only /
+# medium / large) with AP50-95, AP50 and recall each, then runtime.
 SIZE_METRICS = (
     "map50_95",
     "map50",
     "recall50_25",
-    "ap_tiny",
-    "recall_tiny",
-    "ap_small",
-    "recall_small",
-    "ap_medium",
-    "recall_medium",
-    "ap_large",
-    "recall_large",
+    *(f"{prefix}_{group}" for group in DISJOINT_SIZE_GROUPS for prefix in ("ap", "ap50", "recall")),
     "runtime_mean_ms",
     "runtime_p95_ms",
 )
@@ -72,9 +68,7 @@ def native_size_groups(images: list[Path]) -> dict[str, list[int]]:
     return groups
 
 
-def _predict(
-    model: YOLO, images: list[Path], params: dict[str, Any], batch: int
-) -> dict[str, Any]:
+def _predict(model: YOLO, images: list[Path], params: dict[str, Any], batch: int) -> dict[str, Any]:
     if params["inference"] == "tiled":
         return predict_images_tiled(
             model,
