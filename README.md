@@ -120,6 +120,19 @@ the shared evaluator via `evaluate_split(..., inference="tiled")`. Point its
 `WEIGHTS` dict at any checkpoints (e.g. `runs/finetune/...`). See
 [docs/tiling_results.md](docs/tiling_results.md).
 
+## Higher-resolution inference (stage 2c)
+
+[notebooks/highres.ipynb](notebooks/highres.ipynb) scores 1280 full-image inference
+with the shared evaluator via `evaluate_split(..., imgsz=1280)` and merges
+640 / 1280 / tiling into one comparison table. Results land in `runs/highres/`. Point
+its `WEIGHTS` dict at the same checkpoints as the baseline and tiling runs.
+
+Its appendix scores every condition separately per native image size (960×540,
+1360×765, 1920×1080 — images with a long side < 1280 are upscaled at 1280, not
+enriched) via the standalone
+[`src/evaluation/native_size.py`](src/evaluation/native_size.py). This is a
+supplementary table only; the main evaluator is unchanged.
+
 ### Conventions
 
 * Seed 42 everywhere (training, manifests, subsets).
