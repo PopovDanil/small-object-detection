@@ -227,3 +227,6 @@ data/*
 runs/
 *.pt
 *.pth
+
+# Packed final artifacts (checkpoints inside; >100 MB, keep out of git)
+results/*.zip

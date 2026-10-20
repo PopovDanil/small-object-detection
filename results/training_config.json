@@ -1,0 +1,28 @@
+{
+  "imgsz": 640,
+  "epochs": 50,
+  "patience": 15,
+  "optimizer": "auto",
+  "lr0": 0.01,
+  "nbs": 64,
+  "warmup_epochs": 3,
+  "cos_lr": true,
+  "weight_decay": 0.0005,
+  "close_mosaic": 10,
+  "seed": 42,
+  "deterministic": true,
+  "pretrained": true,
+  "freeze": null,
+  "workers": 2,
+  "val": true,
+  "batch": 16,
+  "effective_batch": 16,
+  "run_pilot": true,
+  "pilot_model": "yolo26x",
+  "gpu": "2x Tesla T4 (Kaggle), one model per GPU",
+  "pilot_peak_gpu_gb": {
+    "4": 5.44,
+    "8": 9.47,
+    "16": 15.12
+  }
+}

@@ -166,12 +166,17 @@ evaluate_split(
 
 ## 7. Results
 
-To be filled once the full 50-epoch runs complete. The notebook writes
-`runs/finetune/finetune_summary.csv` with, per model, the number of epochs run,
-the selected epoch, best validation mAP50–95/mAP50 and training wall time; the
-final test-dev scores for all inference conditions are then produced by the
-shared evaluator (see [docs/tiling_results.md](tiling_results.md) for the tiling
-tables, which are re-runnable against these checkpoints).
+Both runs completed all 50 epochs on Kaggle (2× T4, one model per GPU, batch 16 fixed by
+the pilot: peak 15.1 GB for `yolo26x`); early stopping did not trigger.
+
+| Model | Best epoch | Best val mAP50–95 | Best val mAP50 | Wall time |
+|---|---:|---:|---:|---:|
+| yolo26m | 40 | 0.281 | 0.473 | 3.2 h |
+| yolo26x | 40 | 0.308 | 0.508 | 7.9 h |
+
+Test-dev mAP50–95 at 640 (shared evaluator): 0.214 (m), 0.232 (x) — vs 0.185 / 0.207 after
+the 5-epoch stage-1 run. All inference conditions, size groups and runtime:
+[docs/results.md](results.md); raw numbers: [results/](../results/).
 
 ## 8. Reproducibility notes
 

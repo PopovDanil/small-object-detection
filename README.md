@@ -4,6 +4,13 @@ Does tiled or higher-resolution inference improve small-object detection on aeri
 images compared with standard 640px resizing, and what is the accuracy–runtime
 trade-off? Full project definition: [docs/proposal.md](docs/proposal.md).
 
+**Results:** [docs/results.md](docs/results.md) (final report, RU) · raw numbers:
+[results/metrics_all.csv](results/metrics_all.csv) ([column guide](results/README.md)).
+In short: 1280 full-image inference beats 640 by +3.8…4.1 mAP50–95 and roughly doubles
+recall on tiny objects at ×3.3–3.7 runtime; 640×640 tiling gives similar recall but only
++0.8…0.9 mAP at ×7–8 runtime, because large objects regress. `python scripts/pack_results.py`
+packs report + best checkpoints + all computed results into one zip.
+
 We fine-tune **YOLO26m** and **YOLO26x** (COCO-pretrained) on **VisDrone2019-DET**
 (10 classes) at `imgsz=640` and evaluate each checkpoint under three inference
 conditions: 640 full-image baseline, 1280 full-image, and 640×640 tiling at native
