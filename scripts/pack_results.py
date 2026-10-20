@@ -1,12 +1,16 @@
-"""Pack the final artifacts into one zip: report, best checkpoints, all computed results.
+"""Pack the final artifacts into one zip: report, all computed results, optionally weights.
 
 Reads ``runs/`` (fine-tune + evaluation outputs), ``results/`` and ``docs/results.md``;
-writes ``results/small_object_detection_results.zip`` with the layout described in
-``results/ARCHIVE_README.md`` (copied into the archive as ``README.md``).
+writes the layout described in ``results/ARCHIVE_README.md`` (copied into the archive as
+``README.md``):
+
+* default: ``results/small_object_detection_results.zip`` without checkpoints (committed);
+* ``--with-weights``: ``results/small_object_detection_results_with_weights.zip`` including
+  both ``best.pt`` files (~160 MB, kept out of git: GitHub rejects files over 100 MB).
 
 Usage::
 
-    python scripts/pack_results.py [--stage finetune]
+    python scripts/pack_results.py [--with-weights] [--stage finetune]
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS = ("yolo26m", "yolo26x")
 
 
-def build_manifest(stage: str) -> list[tuple[Path, str]]:
+def build_manifest(stage: str, with_weights: bool) -> list[tuple[Path, str]]:
     """(source file, path inside the archive) for every packed file."""
     runs = ROOT / "runs"
     train = runs / stage
@@ -31,10 +35,9 @@ def build_manifest(stage: str) -> list[tuple[Path, str]]:
 
     for model in MODELS:
         run = train / f"{model}_s640"
-        entries += [
-            (run / "weights" / "best.pt", f"checkpoints/{model}_s640/best.pt"),
-            (run / "args.yaml", f"checkpoints/{model}_s640/args.yaml"),
-        ]
+        entries.append((run / "args.yaml", f"checkpoints/{model}_s640/args.yaml"))
+        if with_weights:
+            entries.append((run / "weights" / "best.pt", f"checkpoints/{model}_s640/best.pt"))
         entries += [
             (p, f"experiments/training/{model}_s640/{p.name}")
             for p in sorted(run.iterdir())
@@ -101,17 +104,18 @@ def build_manifest(stage: str) -> list[tuple[Path, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", default="finetune")
-    parser.add_argument(
-        "--out", default=str(ROOT / "results" / "small_object_detection_results.zip")
-    )
+    parser.add_argument("--with-weights", action="store_true", help="include best.pt files")
+    parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
-    entries = build_manifest(args.stage)
+    suffix = "_with_weights" if args.with_weights else ""
+    default_out = ROOT / "results" / f"small_object_detection_results{suffix}.zip"
+    entries = build_manifest(args.stage, args.with_weights)
     missing = [str(src) for src, _ in entries if not src.is_file()]
     if missing:
         raise FileNotFoundError("missing inputs:\n  " + "\n  ".join(missing))
 
-    out = Path(args.out)
+    out = Path(args.out) if args.out else default_out
     with zipfile.ZipFile(out, "w") as archive:
         for src, arcname in entries:
             # Checkpoints/PNGs are already compressed: store them, deflate the rest.

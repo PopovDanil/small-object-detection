@@ -1,238 +1,239 @@
-# Итоговые результаты: 640 vs 1280 vs тайлинг на VisDrone2019-DET
+# Final results: 640 vs 1280 vs tiling on VisDrone2019-DET
 
-Финальный отчёт по проекту **P17 Small-Object Detection in Aerial Images**: *«Compare
-standard resizing with tiling or higher-resolution inference. Report AP/recall, runtime,
-and failure cases involving very small objects.»*
+Final report of project **P17 Small-Object Detection in Aerial Images**: *"Compare standard
+resizing with tiling or higher-resolution inference. Report AP/recall, runtime, and failure
+cases involving very small objects."*
 
-Все числа — test-dev VisDrone2019-DET (1 610 кадров, 75 101 объект), финальные веса после
-полного дообучения (50 эпох), один общий оценщик
-[`src/evaluation/metrics.py`](../src/evaluation/metrics.py). Сырые числа (0–1, все метрики):
-[`results/metrics_all.csv`](../results/metrics_all.csv), описание колонок —
-[`results/README.md`](../results/README.md). Числа соответствуют нашему протоколу и не
-являются официальными результатами лидерборда VisDrone.
+All numbers are on VisDrone2019-DET **test-dev** (1,610 images, 75,101 objects), computed with
+the final weights after the full fine-tune (50 epochs) by one shared evaluator,
+[`src/evaluation/metrics.py`](../src/evaluation/metrics.py). Raw numbers (0–1, every metric):
+[`results/metrics_all.csv`](../results/metrics_all.csv); column guide:
+[`results/README.md`](../results/README.md). The numbers follow our protocol and are not
+official VisDrone leaderboard scores.
 
 ---
 
-## 0. Коротко
+## 0. Summary
 
-| Вопрос | Ответ |
+| Question | Answer |
 |---|---|
-| Помогает ли повышение разрешения на инференсе мелким объектам? | **Да, сильно.** И 1280, и тайлинг поднимают recall на tiny-объектах (<16² px) в 1.6–1.7 раза (25 → 41–47 %), AP на tiny — в 1.4–1.7 раза. |
-| Что лучше — 1280 или тайлинг? | **1280.** Выше mAP (+4 пункта против +0.9), выше AP на tiny и small, в **2.2 раза быстрее** тайлинга. Тайлинг выигрывает только recall на tiny (+1–2 пункта) — и AP на tiny лишь на самых больших кадрах (1920 px), где он реально даёт больше пикселей, чем 1280. |
-| Чем платим? | Время на кадр: 1280 — ×3.3–3.7 к 640, тайлинг — ×7.2–8.1. Крупные объекты (≥96² px) **проседают** в обоих режимах (1280: −4…−10 AP, тайлинг: −14…−18 AP). |
-| Что важнее для мелких объектов — разрешение или ёмкость модели? | **Разрешение.** yolo26x вместо yolo26m даёт +1.6–1.9 mAP при ×2.2–2.5 по времени; 1280 вместо 640 — +3.8–4.1 mAP. yolo26m@1280 (25.4) лучше yolo26x@640 (23.2). |
-| Какое перекрытие тайлов? | 20 % — разумный компромисс: 0→20 % даёт +0.6 mAP, 20→40 % — +0.03 mAP при почти двукратном росте p95-времени. |
+| Does higher inference resolution help small objects? | **Yes, a lot.** Both 1280 and tiling raise recall on tiny objects (<16² px) by 1.6–1.7× (25 → 41–47 %) and AP on tiny objects by 1.4–1.7×. |
+| Which is better, 1280 or tiling? | **1280.** Higher mAP (+4 points vs +0.9), higher AP on tiny and small objects, and **2.2× faster** than tiling. Tiling only wins recall on tiny objects (+1–2 points), and AP on tiny objects only on the largest frames (~1920 px), where it actually adds pixels over 1280. |
+| What is the cost? | Runtime per image: 1280 ×3.3–3.7 vs 640, tiling ×7.2–8.1. Large objects (≥96² px) **regress** in both modes (1280: −4…−10 AP, tiling: −14…−18 AP). |
+| What matters more for small objects: resolution or model capacity? | **Resolution.** yolo26x instead of yolo26m gives +1.6–1.9 mAP at ×2.2–2.5 runtime; 1280 instead of 640 gives +3.8–4.1 mAP. yolo26m@1280 (25.4) beats yolo26x@640 (23.2). |
+| Which tile overlap? | 20 % is a sensible trade-off: 0→20 % gives +0.6 mAP, 20→40 % only +0.03 mAP at almost 2× p95 runtime. |
 
 ---
 
-## 1. Что именно сравнивается
+## 1. What is compared
 
-Дообучение **одно** для каждой модели — на `imgsz=640`. Затем **одни и те же веса**
-проверяются в трёх режимах подачи изображения. Меняется только инференс, поэтому разница
-между режимами — эффект именно разрешения на входе, а не обучения.
+Each model is fine-tuned **once**, at `imgsz=640`. The **same weights** are then evaluated under
+three input modes. Only inference changes, so differences between modes are the effect of the
+input resolution, not of training.
 
-| Режим (в задании) | В проекте | Что происходит с кадром | Проходов модели на кадр |
+| Mode (task wording) | In the project | What happens to the image | Forward passes per image |
 |---|---|---|---:|
-| standard resizing | `full-640` | весь кадр сжимается до длинной стороны 640 (1920×1080 → 640×360) | 1 |
-| higher-resolution inference | `full-1280` | весь кадр — до длинной стороны 1280 | 1 |
-| tiling | `tiled-ov20` | кадр в **родном разрешении** режется на куски 640×640 с перекрытием 20 %; рамки переводятся в координаты кадра и склеиваются NMS (IoU 0.7) | 2–8 |
+| standard resizing | `full-640` | the whole image is downscaled to a 640 long side (1920×1080 → 640×360) | 1 |
+| higher-resolution inference | `full-1280` | the whole image is resized to a 1280 long side | 1 |
+| tiling | `tiled-ov20` | the image is cut at **native resolution** into 640×640 crops with 20 % overlap; boxes are mapped back to image coordinates and merged with NMS (IoU 0.7) | 2–8 |
 
-Две модели × три режима = **6 основных экспериментов**, плюс анализ чувствительности к
-перекрытию тайлов (0 / 20 / 40 %) для yolo26m.
+Two models × three modes = **6 main experiments**, plus a tile-overlap sensitivity analysis
+(0 / 20 / 40 %) for yolo26m.
 
-**Важная деталь: что значит «1280» для разных кадров.** `imgsz` — это не фиксированный вход
-сети (YOLO полносвёрточная, принимает любой размер, кратный 32), а длина, к которой
-приводится длинная сторона. Кадры меньше `imgsz` **растягиваются** (новых деталей нет, только
-интерполяция). В test-dev шесть родных размеров:
+**What "1280" means for different frames.** `imgsz` is not a fixed network input (YOLO is fully
+convolutional and accepts any size divisible by 32); it is the length the long side is resized
+to. Frames smaller than `imgsz` are **upscaled** (no new detail, only interpolation). Test-dev has
+six native sizes:
 
-| Родной размер | Кадров | Масштаб при 640 | Масштаб при 1280 | Тайлов (20 %) |
+| Native size | Images | Scale at 640 | Scale at 1280 | Tiles (20 %) |
 |---|---:|---:|---:|---:|
-| 960×540 | 49 | ×0.67 | **×1.33 (растяжение)** | 2 |
+| 960×540 | 49 | ×0.67 | **×1.33 (upscaling)** | 2 |
 | 1360×765 | 167 | ×0.47 | ×0.94 | 6 |
 | 1400×788 | 933 | ×0.46 | ×0.91 | 6 |
 | 1400×1050 | 274 | ×0.46 | ×0.91 | 6 |
 | 1916×1078 | 151 | ×0.33 | ×0.67 | 8 |
 | 1920×1080 | 36 | ×0.33 | ×0.67 | 8 |
 
-Для **85 %** кадров (ширина 1360–1400) режим 1280 — это почти родное разрешение (×0.91–0.94).
-Тайлинг (×1.0) даёт сверх 1280 лишь ~10 % по стороне (~20 % по площади), и только для 187
-кадров шириной ~1920 — заметно больше (×1.0 против ×0.67, в 2.2 раза по площади). Это объясняет большую часть результатов ниже.
+For **85 %** of the images (width 1360–1400), 1280 is almost native resolution (×0.91–0.94).
+Tiling (×1.0) adds only ~10 % per side (~20 % in area) over 1280; only for the 187 frames of
+width ~1920 does it add substantially more (×1.0 vs ×0.67, 2.2× in area). This explains most of
+the results below.
 
 ---
 
-## 2. Данные
+## 2. Data
 
-Официальное разбиение VisDrone2019-DET, ничего не перемешивается. 10 классов (pedestrian,
-people, bicycle, car, van, truck, tricycle, awning-tricycle, bus, motor); области «ignored
-regions» и «don't care» исключены из обучения и учитываются оценщиком (предсказания в них
-не штрафуются).
+Official VisDrone2019-DET splits, nothing reshuffled. 10 classes (pedestrian, people, bicycle,
+car, van, truck, tricycle, awning-tricycle, bus, motor); "ignored regions" and "don't care"
+areas are excluded from training targets and respected by the evaluator (predictions inside
+them are not penalised).
 
-| Выборка | Кадров | Объектов | Роль |
+| Split | Images | Objects | Role |
 |---|---:|---:|---|
-| train | 6 471 | 343 197 | обучение весов |
-| val | 548 | 38 759 | **только** выбор лучшей эпохи и ранняя остановка |
-| test-dev | 1 610 | 75 101 | **только** итоговые числа этого отчёта |
+| train | 6,471 | 343,197 | training the weights |
+| val | 548 | 38,759 | **only** best-epoch selection and early stopping |
+| test-dev | 1,610 | 75,101 | **only** the final numbers in this report |
 
-Гиперпараметры на val не подбирались — они зафиксированы протоколом заранее; единственное,
-что подбиралось, — батч (по памяти GPU, не по точности, см. §3).
+No hyperparameters were tuned on val — they were fixed by the protocol in advance; the only
+value selected was the batch size (by GPU memory, not by accuracy; see §3).
 
-**Объекты test-dev по размеру** (площадь в пикселях исходного кадра, непересекающиеся группы):
+**Test-dev objects by size** (area in original-image pixels, disjoint groups):
 
-| Группа | Площадь | Объектов | Доля |
+| Group | Area | Objects | Share |
 |---|---|---:|---:|
-| tiny | < 16² (256 px²) | 27 345 | 36.4 % |
-| small | 16²–32² | 23 491 | 31.3 % |
-| medium | 32²–96² | 21 856 | 29.1 % |
-| large | ≥ 96² | 2 409 | 3.2 % |
+| tiny | < 16² (256 px²) | 27,345 | 36.4 % |
+| small | 16²–32² | 23,491 | 31.3 % |
+| medium | 32²–96² | 21,856 | 29.1 % |
+| large | ≥ 96² | 2,409 | 3.2 % |
 
-Две трети объектов — маленькие. В test-dev tiny-объектов больше, чем в train (36.4 % против
-26.0 %, см. EDA), поэтому абсолютные числа на tiny ниже, чем «ожидается» по val; на сравнение
-режимов между собой это не влияет — все считаются на одном test-dev.
+Two thirds of all objects are small. Test-dev has more tiny objects than train (36.4 % vs
+26.0 %, see the EDA), so absolute tiny-object numbers are lower than val would suggest; this
+does not affect the comparison of modes, which are all scored on the same test-dev.
 
 ---
 
-## 3. Обучение
+## 3. Training
 
-Обе модели инициализированы весами COCO и дообучены **одним общим конфигом**
-([`results/training_config.json`](../results/training_config.json)): `imgsz=640`, до 50 эпох,
-`patience=15`, AdamW (`optimizer=auto`), `lr0=0.01` с масштабированием на батч (`nbs=64`),
-cosine LR, `warmup_epochs=3`, `weight_decay=5e-4`, аугментации Ultralytics по умолчанию,
-`close_mosaic=10`, seed 42, все слои обучаемы. Батч 16 выбран пилотом на yolo26x (1 эпоха
-на 2 % train): пик памяти 15.1 ГБ на T4 16 ГБ (батч 4 — 5.4 ГБ, 8 — 9.5 ГБ). Обучение шло на
-Kaggle, 2× Tesla T4, по модели на карту, параллельно.
+Both models start from COCO-pretrained weights and are fine-tuned with **one shared config**
+([`results/training_config.json`](../results/training_config.json)): `imgsz=640`, up to 50
+epochs, `patience=15`, AdamW (`optimizer=auto`), `lr0=0.01` scaled to the batch (`nbs=64`),
+cosine LR, `warmup_epochs=3`, `weight_decay=5e-4`, default Ultralytics augmentation,
+`close_mosaic=10`, seed 42, all layers trainable. Batch 16 was chosen by a pilot on yolo26x
+(1 epoch on 2 % of train): peak memory 15.1 GB on a 16 GB T4 (batch 4: 5.4 GB, 8: 9.5 GB).
+Training ran on Kaggle, 2× Tesla T4, one model per GPU in parallel.
 
-| Модель | Параметры | Эпох | Лучшая эпоха | val mAP50–95 | val mAP50 | Время |
+| Model | Parameters | Epochs | Best epoch | val mAP50–95 | val mAP50 | Wall time |
 |---|---:|---:|---:|---:|---:|---:|
-| yolo26m | 21.8 M | 50 | 40 | 0.281 | 0.473 | 3.2 ч |
-| yolo26x | 58.8 M | 50 | 40 | 0.308 | 0.508 | 7.9 ч |
+| yolo26m | 21.8 M | 50 | 40 | 0.281 | 0.473 | 3.2 h |
+| yolo26x | 58.8 M | 50 | 40 | 0.308 | 0.508 | 7.9 h |
 
-![Кривые обучения на val](figures/finetune_val_curves.png)
+![Validation curves](figures/finetune_val_curves.png)
 
-Обе модели вышли на плато к ~40-й эпохе, ранняя остановка не сработала — 50 эпох хватило.
-Для сравнения: короткое 5-эпоховое обучение из бейзлайна давало на test-dev при 640
-mAP50–95 18.5 (m) и 20.7 (x); полное — **21.4 и 23.2** (стадия 1 считалась старой версией
-оценщика, см. §4, поэтому сравнение приблизительное).
+Both models plateau around epoch 40; early stopping did not trigger, so 50 epochs were enough.
+For comparison, the short 5-epoch baseline run gave test-dev mAP50–95 at 640 of 18.5 (m) and
+20.7 (x); the full run gives **21.4 and 23.2** (stage 1 was scored with the older evaluator,
+see §4, so the comparison is approximate).
 
-> val-метрики выше считает встроенный валидатор Ultralytics (без учёта ignored regions,
-> другой лимит рамок). Их нельзя напрямую сравнивать с числами на test-dev ниже.
+> The val metrics above come from the built-in Ultralytics validator (ignored regions not
+> respected, different detection cap). They cannot be compared directly with the test-dev
+> numbers below.
 
 ---
 
-## 4. Протокол оценки
+## 4. Evaluation protocol
 
-Все режимы считаются **одним** оценщиком, все параметры зафиксированы до просмотра
-результатов:
+All modes are scored by **one** evaluator; all parameters were fixed before looking at results:
 
-| Метрика | Как считается |
+| Metric | Definition |
 |---|---|
-| **mAP50–95** | COCO AP, IoU 0.50:0.05:0.95, порог уверенности 0.001 |
-| **mAP50** | то же при IoU 0.5 |
-| **Recall** | доля объектов, найденных при IoU ≥ 0.5 **и** уверенности ≥ 0.25 |
-| **AP / AP50 / Recall по размеру** | то же только по объектам группы (tiny / small / medium / large) |
-| **Время** | мс на **исходный** кадр, батч 1, 10 кадров прогрева, `cuda.synchronize`; для тайлинга — все тайлы + склейка; первые 200 кадров test-dev; Tesla T4 |
+| **mAP50–95** | COCO AP, IoU 0.50:0.05:0.95, confidence threshold 0.001 |
+| **mAP50** | the same at IoU 0.5 |
+| **Recall** | share of objects found at IoU ≥ 0.5 **and** confidence ≥ 0.25 |
+| **AP / AP50 / Recall per size** | the same, restricted to objects of one group (tiny / small / medium / large) |
+| **Runtime** | ms per **original** image, batch 1, 10 warm-up images, `cuda.synchronize`; tiling counts all tiles + merging; first 200 test-dev images; Tesla T4 |
 
-Детали, важные для честного сравнения:
+Details that matter for a fair comparison:
 
-1. **Одинаковый лимит рамок — 1000 на кадр во всех режимах.** По умолчанию Ultralytics отдаёт
-   ≤300 рамок на *один прогон*: при 640/1280 это 300 на кадр, а при тайлинге — 300 на *тайл*
-   (до 2 400 на кадр). На людных кадрах (до ~900 объектов) это давало тайлингу фору. Лимит
-   выровнен (для тайлинга — после склейки), COCOeval тоже считает до 1000 рамок. Цифры
-   5-эпоховой стадии в `docs/baseline_results.md` и `docs/tiling_results.md` посчитаны *до*
-   этого исправления.
-2. **Группы размеров не пересекаются** (в COCO «small» включает tiny). COCO-small тоже есть в
-   [`metrics_all.csv`](../results/metrics_all.csv) (`ap_small`) для сравнимости с литературой.
-3. **AP50 рядом с AP50–95.** Для рамки 10×10 px сдвиг на 1–2 px уже опускает IoU ниже 0.75,
-   поэтому AP50–95 на tiny занижен самой метрикой. AP50 отвечает на вопрос «нашли ли объект»,
-   AP50–95 — «насколько точно».
-4. Все координаты — в пикселях исходного кадра; ignored regions учитываются.
-5. Один прогон без доверительных интервалов: разницу меньше ~0.5 пункта считать шумом.
-   Выводы ниже опираются на разницы в несколько пунктов.
+1. **Same detection cap — 1000 per image — in every mode.** By default Ultralytics returns
+   ≤300 boxes per *forward pass*: 300 per image at 640/1280, but 300 per *tile* with tiling (up
+   to 2,400 per image). On crowded frames (up to ~900 objects) this favoured tiling. The cap is
+   now equal (for tiling, after merging), and COCOeval also uses up to 1000 detections. The
+   5-epoch stage-1 numbers in `docs/baseline_results.md` and `docs/tiling_results.md` were
+   computed *before* this fix.
+2. **Size groups are disjoint** (in COCO, "small" includes tiny). COCO-small is also kept in
+   [`metrics_all.csv`](../results/metrics_all.csv) (`ap_small`) for comparability.
+3. **AP50 next to AP50–95.** For a 10×10 px box, a 1–2 px shift already drops IoU below 0.75,
+   so AP50–95 on tiny objects is depressed by the metric itself. AP50 answers "was the object
+   found?", AP50–95 "how precisely was it localised?".
+4. All coordinates are in original-image pixels; ignored regions are respected.
+5. Single run, no confidence intervals: treat differences below ~0.5 points as noise. The
+   conclusions below rest on differences of several points.
 
 ---
 
-## 5. Результаты
+## 5. Results
 
-Все метрики ниже — ×100 (пункты AP / recall). Δ — разница с `full-640` той же модели в
-пунктах; × — во сколько раз.
+All metrics below are ×100 (AP / recall points). Δ is the difference from `full-640` of the same
+model, in points; × is a ratio.
 
-### 5.1. Общие метрики и время (таблица 1)
+### 5.1. Overall metrics and runtime (Table 1)
 
-| Модель | Режим | mAP50–95 | mAP50 | Recall | мс/кадр (mean) | мс/кадр (p95) | Δ mAP50–95 | Δ mAP50 | Δ Recall | × время |
+| Model | Mode | mAP50–95 | mAP50 | Recall | ms/img (mean) | ms/img (p95) | Δ mAP50–95 | Δ mAP50 | Δ Recall | × runtime |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | yolo26m | 640 | 21.35 | 36.19 | 57.42 | 22.1 | 26.6 | — | — | — | — |
 | yolo26m | **1280** | **25.43** | **43.26** | **66.72** | 72.2 | 75.6 | **+4.08** | **+7.07** | **+9.30** | 3.27 |
-| yolo26m | тайлинг 20 % | 22.16 | 38.42 | 66.66 | 160.1 | 245.7 | +0.81 | +2.23 | +9.24 | 7.24 |
+| yolo26m | tiling 20 % | 22.16 | 38.42 | 66.66 | 160.1 | 245.7 | +0.81 | +2.23 | +9.24 | 7.24 |
 | yolo26x | 640 | 23.21 | 39.01 | 60.41 | 47.9 | 51.6 | — | — | — | — |
 | yolo26x | **1280** | **27.02** | **45.52** | **70.24** | 176.9 | 187.2 | **+3.81** | **+6.51** | **+9.82** | 3.70 |
-| yolo26x | тайлинг 20 % | 24.09 | 41.26 | 70.02 | 388.1 | 617.8 | +0.88 | +2.25 | +9.60 | 8.11 |
+| yolo26x | tiling 20 % | 24.09 | 41.26 | 70.02 | 388.1 | 617.8 | +0.88 | +2.25 | +9.60 | 8.11 |
 
-![Точность против времени](figures/tradeoff.png)
+![Accuracy vs runtime](figures/tradeoff.png)
 
-- **Recall** растёт одинаково в обоих режимах (+9–10 пунктов): оба находят заметно больше
-  объектов, чем 640.
-- **mAP** растёт в основном у 1280 (+4 пункта), у тайлинга — меньше чем на пункт: прирост на
-  мелких объектах съедается обвалом на крупных (§5.2).
-- **Время:** 1280 — ×3.3–3.7, тайлинг — ×7.2–8.1, а p95 у тайлинга ещё хуже (зависит от
-  числа тайлов: 2 у кадра 960 px, 8 у 1920 px). На графике 1280 для обеих моделей лежит
-  выше-левее тайлинга: **по соотношению точность/время 1280 доминирует тайлинг.**
+- **Recall** rises equally in both modes (+9–10 points): both find many more objects than 640.
+- **mAP** rises mostly with 1280 (+4 points); with tiling by less than a point — the gain on
+  small objects is eaten by the collapse on large ones (§5.2).
+- **Runtime:** 1280 costs ×3.3–3.7, tiling ×7.2–8.1, and tiling's p95 is worse still (it
+  depends on the number of tiles: 2 for a 960 px frame, 8 for 1920 px). On the plot, 1280 lies
+  above and to the left of tiling for both models: **in accuracy per runtime, 1280 dominates
+  tiling.**
 
-### 5.2. По размеру объектов (таблица 2)
+### 5.2. Per object size (Table 2)
 
 **yolo26m:**
 
-| Размер | Объектов | Режим | AP50–95 | AP50 | Recall | Δ AP50–95 | Δ AP50 | Δ Recall |
+| Size | Objects | Mode | AP50–95 | AP50 | Recall | Δ AP50–95 | Δ AP50 | Δ Recall |
 |---|---:|---|---:|---:|---:|---:|---:|---:|
-| tiny (<16²) | 27 345 | 640 | 6.21 | 15.31 | 25.29 | — | — | — |
+| tiny (<16²) | 27,345 | 640 | 6.21 | 15.31 | 25.29 | — | — | — |
 | | | 1280 | **9.43** | **23.45** | 40.68 | **+3.22** | **+8.14** | +15.39 |
-| | | тайлинг | 8.79 | 21.75 | **42.59** | +2.57 | +6.43 | **+17.30** |
-| small (16²–32²) | 23 491 | 640 | 15.64 | 32.22 | 65.48 | — | — | — |
+| | | tiling | 8.79 | 21.75 | **42.59** | +2.57 | +6.43 | **+17.30** |
+| small (16²–32²) | 23,491 | 640 | 15.64 | 32.22 | 65.48 | — | — | — |
 | | | 1280 | **21.87** | **41.96** | **75.60** | **+6.23** | **+9.74** | **+10.12** |
-| | | тайлинг | 19.39 | 37.96 | 75.24 | +3.75 | +5.74 | +9.76 |
-| medium (32²–96²) | 21 856 | 640 | 31.31 | 51.17 | 85.23 | — | — | — |
+| | | tiling | 19.39 | 37.96 | 75.24 | +3.75 | +5.74 | +9.76 |
+| medium (32²–96²) | 21,856 | 640 | 31.31 | 51.17 | 85.23 | — | — | — |
 | | | 1280 | **35.25** | **55.54** | **87.46** | **+3.95** | **+4.37** | **+2.24** |
-| | | тайлинг | 30.75 | 49.24 | 85.66 | −0.56 | −1.93 | +0.43 |
-| large (≥96²) | 2 409 | 640 | **47.30** | **64.26** | **91.28** | — | — | — |
+| | | tiling | 30.75 | 49.24 | 85.66 | −0.56 | −1.93 | +0.43 |
+| large (≥96²) | 2,409 | 640 | **47.30** | **64.26** | **91.28** | — | — | — |
 | | | 1280 | 36.82 | 52.52 | 87.67 | −10.48 | −11.74 | −3.61 |
-| | | тайлинг | 29.19 | 42.55 | 84.02 | **−18.11** | **−21.71** | **−7.26** |
+| | | tiling | 29.19 | 42.55 | 84.02 | **−18.11** | **−21.71** | **−7.26** |
 
 **yolo26x:**
 
-| Размер | Объектов | Режим | AP50–95 | AP50 | Recall | Δ AP50–95 | Δ AP50 | Δ Recall |
+| Size | Objects | Mode | AP50–95 | AP50 | Recall | Δ AP50–95 | Δ AP50 | Δ Recall |
 |---|---:|---|---:|---:|---:|---:|---:|---:|
-| tiny (<16²) | 27 345 | 640 | 6.47 | 16.23 | 28.69 | — | — | — |
+| tiny (<16²) | 27,345 | 640 | 6.47 | 16.23 | 28.69 | — | — | — |
 | | | 1280 | **11.08** | **26.34** | 45.50 | **+4.61** | **+10.11** | +16.82 |
-| | | тайлинг | 9.82 | 23.50 | **46.83** | +3.36 | +7.27 | **+18.14** |
-| small (16²–32²) | 23 491 | 640 | 17.54 | 35.21 | 68.93 | — | — | — |
+| | | tiling | 9.82 | 23.50 | **46.83** | +3.36 | +7.27 | **+18.14** |
+| small (16²–32²) | 23,491 | 640 | 17.54 | 35.21 | 68.93 | — | — | — |
 | | | 1280 | **23.80** | **44.93** | **79.25** | **+6.27** | **+9.72** | **+10.32** |
-| | | тайлинг | 21.73 | 41.10 | 78.84 | +4.19 | +5.89 | +9.91 |
-| medium (32²–96²) | 21 856 | 640 | 34.22 | 54.82 | 87.44 | — | — | — |
+| | | tiling | 21.73 | 41.10 | 78.84 | +4.19 | +5.89 | +9.91 |
+| medium (32²–96²) | 21,856 | 640 | 34.22 | 54.82 | 87.44 | — | — | — |
 | | | 1280 | **36.94** | **57.40** | **89.30** | **+2.72** | **+2.58** | **+1.86** |
-| | | тайлинг | 33.74 | 53.36 | 87.61 | −0.48 | −1.46 | +0.17 |
-| large (≥96²) | 2 409 | 640 | **44.98** | **60.45** | **92.36** | — | — | — |
+| | | tiling | 33.74 | 53.36 | 87.61 | −0.48 | −1.46 | +0.17 |
+| large (≥96²) | 2,409 | 640 | **44.98** | **60.45** | **92.36** | — | — | — |
 | | | 1280 | 40.90 | 55.86 | 90.24 | −4.08 | −4.58 | −2.12 |
-| | | тайлинг | 31.26 | 45.44 | 87.59 | **−13.72** | **−15.00** | **−4.77** |
+| | | tiling | 31.26 | 45.44 | 87.59 | **−13.72** | **−15.00** | **−4.77** |
 
-![Изменение относительно 640 по размерам](figures/delta_by_size.png)
+![Change vs 640 per object size](figures/delta_by_size.png)
 
-Что видно:
+Observations:
 
-1. **Мелкие объекты (tiny + small = 68 % всех объектов) — главный выигрыш.** Recall на tiny:
-   25 → 41–43 % (m) и 29 → 46–47 % (x). AP50 на tiny растёт в 1.4–1.6 раза — объекты
-   действительно *находятся*, а не только «чуть точнее обводятся».
-2. **AP50–95 на tiny остаётся низким** (≤11) даже в лучшем режиме: найденные tiny-объекты
-   обводятся неточно (AP50 в 2.4–2.5 раза выше AP50–95). Для объекта в 10 px ошибка в 1–2 px —
-   это уже IoU < 0.75; это свойство метрики не меньше, чем детектора.
-3. **На tiny и small 1280 точнее тайлинга по AP** (на +0.6…+2.5 пункта), а тайлинг лишь
-   чуть впереди по recall на tiny (+1.3…+1.9). Причина — §1: для 85 % кадров 1280 ≈ родное
-   разрешение, так что пикселей у тайлинга почти не больше, а контекст кадра режется.
-4. **Medium:** 1280 помогает (+2.7…+4.0), тайлинг — нет (≈0).
-5. **Large: оба режима вредят**, тайлинг — вдвое сильнее (см. §6).
+1. **Small objects (tiny + small = 68 % of all objects) are where the gain is.** Recall on tiny:
+   25 → 41–43 % (m) and 29 → 46–47 % (x). AP50 on tiny grows 1.4–1.6× — objects are actually
+   *found*, not just outlined slightly better.
+2. **AP50–95 on tiny objects stays low** (≤11) even in the best mode: found tiny objects are
+   localised imprecisely (AP50 is 2.4–2.5× AP50–95). For a 10 px object, a 1–2 px error already
+   means IoU < 0.75 — a property of the metric as much as of the detector.
+3. **On tiny and small objects, 1280 beats tiling in AP** (by +0.6…+2.5 points), while tiling is
+   only slightly ahead in tiny recall (+1.3…+1.9). The reason is §1: for 85 % of the frames,
+   1280 ≈ native resolution, so tiling has barely more pixels but cuts the image context.
+4. **Medium:** 1280 helps (+2.7…+4.0), tiling does not (≈0).
+5. **Large: both modes hurt**, tiling about twice as much (see §6).
 
-### 5.3. Разрешение против ёмкости модели (таблица 3)
+### 5.3. Resolution vs model capacity (Table 3)
 
-yolo26x − yolo26m внутри каждого режима, пункты:
+yolo26x − yolo26m within each mode, points:
 
-| | 640 | 1280 | тайлинг 20 % |
+| | 640 | 1280 | tiling 20 % |
 |---|---:|---:|---:|
 | Δ mAP50–95 | +1.86 | +1.59 | +1.93 |
 | Δ mAP50 | +2.82 | +2.26 | +2.83 |
@@ -242,50 +243,51 @@ yolo26x − yolo26m внутри каждого режима, пункты:
 | Δ AP50–95 medium | +2.92 | +1.69 | +2.99 |
 | Δ AP50–95 large | −2.32 | +4.08 | +2.08 |
 | Δ Recall tiny | +3.40 | +4.82 | +4.24 |
-| × время (x / m) | 2.16 | 2.45 | 2.42 |
+| × runtime (x / m) | 2.16 | 2.45 | 2.42 |
 
-- Крупная модель даёт **+1.6…1.9 mAP за ×2.2–2.5 времени**. Повышение входа до 1280 даёт
-  **+3.8…4.1 mAP за ×3.3–3.7**.
-- **На tiny ёмкость при 640 почти бесполезна (+0.26 AP):** если объект сжат до 3–5 px, большая
-  модель его тоже не видит. При 1280 та же разница уже +1.65 — ёмкость помогает, когда объекту
-  дали пиксели.
-- Прямое сравнение одинаковой «цены»: **yolo26m@1280 = 25.4 mAP за 72 мс** против
-  **yolo26x@640 = 23.2 mAP за 48 мс**. Лучшая конфигурация — yolo26x@1280 (27.0 mAP, 177 мс).
+- The larger model gives **+1.6…1.9 mAP for ×2.2–2.5 runtime**. Raising the input to 1280 gives
+  **+3.8…4.1 mAP for ×3.3–3.7**.
+- **On tiny objects, capacity at 640 is almost useless (+0.26 AP):** once an object is squeezed
+  to 3–5 px, the bigger model cannot see it either. At 1280 the same gap is +1.65 — capacity
+  helps once the object is given pixels.
+- At comparable cost: **yolo26m@1280 = 25.4 mAP in 72 ms** vs **yolo26x@640 = 23.2 mAP in
+  48 ms**. The best configuration overall is yolo26x@1280 (27.0 mAP, 177 ms).
 
-**Ответ на второй вопрос проекта:** для мелких объектов входное разрешение важнее ёмкости модели.
+**Answer to the project's secondary question:** for small objects, input resolution matters
+more than model capacity.
 
-### 5.4. Перекрытие тайлов — анализ чувствительности (таблица 4)
+### 5.4. Tile overlap — sensitivity analysis (Table 4)
 
-Только yolo26m, всё остальное зафиксировано. Это **не подбор** гиперпараметра: основное
-значение 20 % задано в proposal заранее, перебор лишь показывает, насколько от него зависит
-результат (выбрать лучшее значение по test-dev было бы подгонкой под тест).
+yolo26m only, everything else fixed. This is **not** hyperparameter tuning: the main value of
+20 % was fixed in the proposal in advance; the sweep only shows how much the result depends on
+it (picking the best value on test-dev would be fitting to the test set).
 
-| Перекрытие | mAP50–95 | Recall | AP tiny | AP small | AP medium | AP large | Recall tiny | мс (mean) | мс (p95) |
+| Overlap | mAP50–95 | Recall | AP tiny | AP small | AP medium | AP large | Recall tiny | ms (mean) | ms (p95) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 0 % | 21.53 | 65.80 | 8.69 | 19.06 | 29.83 | 28.11 | 41.86 | 149.7 | 184.8 |
 | **20 %** | 22.16 | 66.66 | 8.79 | 19.39 | 30.75 | 29.19 | 42.59 | 160.1 | 245.7 |
 | 40 % | 22.20 | 67.10 | 8.97 | 19.50 | 30.64 | 29.43 | 42.79 | 200.6 | 469.7 |
 
-![Перекрытие тайлов](figures/overlap_sweep.png)
+![Tile overlap](figures/overlap_sweep.png)
 
-- 0 → 20 %: +0.64 mAP, +0.86 recall, больше всего — на medium/large (объекты на стыках
-  тайлов перестают теряться), за +7 % среднего времени.
-- 20 → 40 %: +0.04 mAP, +0.44 recall, а p95 времени растёт почти вдвое (245 → 470 мс): у
-  широких кадров число тайлов растёт с 8 до 15.
-- Даже 40 % перекрытия не спасает крупные объекты (AP large 29.4 против 47.3 при 640):
-  проблема не в стыках, а в масштабе и в том, что объект шире тайла (§6).
+- 0 → 20 %: +0.64 mAP, +0.86 recall, mostly on medium/large (objects on tile seams stop being
+  lost), for +7 % mean runtime.
+- 20 → 40 %: +0.04 mAP, +0.44 recall, while p95 runtime nearly doubles (245 → 470 ms): for
+  wide frames the number of tiles grows from 8 to 15.
+- Even 40 % overlap does not rescue large objects (AP large 29.4 vs 47.3 at 640): the problem is
+  not the seams but the scale and the fact that the object is wider than a tile (§6).
 
-### 5.5. Приложение: по родному размеру кадра
+### 5.5. Appendix: per native image size
 
-Те же метрики отдельно для каждой группы кадров
-([`results/metrics_by_native_size.csv`](../results/metrics_by_native_size.csv)). Группы
-сняты разными камерами, с разной высоты и в разных сценах, поэтому сравнивать можно **режимы
-внутри группы**, а не группы между собой. Δ — к 640 в той же группе; время — первые 60 кадров
-группы.
+The same metrics, separately for each group of frames
+([`results/metrics_by_native_size.csv`](../results/metrics_by_native_size.csv)). The groups
+come from different cameras, altitudes and scenes, so compare **modes within a group**, not
+groups with each other. Δ is vs 640 within the same group; runtime is over the first 60 images
+of each group.
 
 **yolo26m:**
 
-| Кадр | Кадров | Масштаб 640 / 1280 | Тайлов | Δ mAP 1280 / тайл | Δ AP tiny 1280 / тайл | Δ Recall tiny 1280 / тайл | мс 640 / 1280 / тайл |
+| Frame | Images | Scale 640 / 1280 | Tiles | Δ mAP 1280 / tiling | Δ AP tiny 1280 / tiling | Δ Recall tiny 1280 / tiling | ms 640 / 1280 / tiling |
 |---|---:|---|---:|---|---|---|---|
 | 960×540 | 49 | ×0.67 / ×1.33 | 2 | +2.4 / +1.9 | +3.8 / +4.0 | +10.6 / +8.9 | 20 / 65 / 55 |
 | 1360×765 | 167 | ×0.47 / ×0.94 | 6 | +3.0 / −1.0 | +3.0 / +2.6 | +23.3 / +26.7 | 20 / 64 / 169 |
@@ -296,7 +298,7 @@ yolo26x − yolo26m внутри каждого режима, пункты:
 
 **yolo26x:**
 
-| Кадр | Кадров | Масштаб 640 / 1280 | Тайлов | Δ mAP 1280 / тайл | Δ AP tiny 1280 / тайл | Δ Recall tiny 1280 / тайл | мс 640 / 1280 / тайл |
+| Frame | Images | Scale 640 / 1280 | Tiles | Δ mAP 1280 / tiling | Δ AP tiny 1280 / tiling | Δ Recall tiny 1280 / tiling | ms 640 / 1280 / tiling |
 |---|---:|---|---:|---|---|---|---|
 | 960×540 | 49 | ×0.67 / ×1.33 | 2 | +1.9 / +0.2 | +4.4 / +0.0 | +14.3 / +10.9 | 45 / 164 / 122 |
 | 1360×765 | 167 | ×0.47 / ×0.94 | 6 | +3.7 / +0.8 | +4.6 / +3.9 | +24.0 / +27.5 | 46 / 162 / 442 |
@@ -305,136 +307,136 @@ yolo26x − yolo26m внутри каждого режима, пункты:
 | 1916×1078 | 151 | ×0.33 / ×0.67 | 8 | +7.3 / +4.9 | **+6.4 / +7.5** | +19.3 / +22.6 | 51 / 170 / 599 |
 | 1920×1080 | 36 | ×0.33 / ×0.67 | 8 | +6.0 / +1.4 | **+3.5 / +4.7** | +37.0 / +44.7 | 50 / 172 / 624 |
 
-- **Где тайлинг реально даёт больше пикселей (кадры ~1920 px: ×1.0 против ×0.67 у 1280), он
-  обгоняет 1280 по AP на tiny** у обеих моделей (у m: +8.8…+8.9 против +3.3…+6.6). Где не
-  даёт (~1400 px, 85 % кадров: ×1.0 против ×0.91), выигрывает 1280. То есть гипотеза «тайлинг
-  лучше на самых маленьких» **верна там, где у тайлинга есть преимущество в разрешении** — в
-  test-dev таких кадров лишь 12 %.
-- **1280 помогает даже на 960×540**, где кадр только растягивается (+1.9…+2.4 mAP): выигрыш
-  даёт не только новая информация, но и то, что объекты становятся крупнее в «единицах»
-  детектора (ближе к размерам, на которых он хорошо работает).
-- Время тайлинга растёт с числом тайлов (2 → 8), у 1280 оно почти постоянно.
-- Группы 960×540 (49 кадров, 1 крупный объект) и 1920×1080 (36 кадров) малы — числа по ним
-  шумные; Δ на large для 960×540 не имеет смысла.
+- **Where tiling really adds pixels (~1920 px frames: ×1.0 vs ×0.67 for 1280), it beats 1280 in
+  AP on tiny objects** for both models (m: +8.8…+8.9 vs +3.3…+6.6). Where it does not (~1400 px,
+  85 % of frames: ×1.0 vs ×0.91), 1280 wins. So the hypothesis "tiling is best for the smallest
+  objects" **holds where tiling has a resolution advantage** — only 12 % of test-dev frames.
+- **1280 helps even on 960×540**, where the frame is only upscaled (+1.9…+2.4 mAP): the gain
+  comes not only from new information but also from objects becoming larger in the detector's
+  "units" (closer to the sizes it handles well).
+- Tiling runtime grows with the number of tiles (2 → 8); 1280 runtime is nearly constant.
+- The 960×540 (49 images, 1 large object) and 1920×1080 (36 images) groups are small, so their
+  numbers are noisy; Δ on large for 960×540 is meaningless.
 
 ---
 
-## 6. Почему так: перекос масштаба и тайлы
+## 6. Why: scale mismatch and tiles
 
-**Перекос масштаба (train/test scale mismatch).** Модель обучалась на кадрах, сжатых до 640
-(объекты уменьшены в 1.5–3 раза), и выучила «привычные» размеры объектов на своих трёх выходах
-(stride 8/16/32). На инференсе 1280 объекты в ~2 раза крупнее привычного, при тайлинге — в
-1.5–3 раза:
+**Train/test scale mismatch.** The model was trained on frames downscaled to 640 (objects
+shrunk 1.5–3×) and learned the "usual" object sizes on its three output scales (stride
+8/16/32). At 1280 inference, objects are ~2× larger than usual; with tiling, 1.5–3× larger:
 
-- для **tiny/small** это плюс: объект в 4 px становится объектом в 8–12 px, который модель
-  видела часто;
-- для **large** — минус: автобус становится крупнее всего, что модель видела при обучении.
+- for **tiny/small** objects this helps: a 4 px object becomes an 8–12 px object the model has
+  seen often;
+- for **large** objects it hurts: a bus becomes larger than anything the model saw in training.
 
-**Доказательство из данных:** large проседает и при **1280, где тайлов нет вообще** (−10.5 AP у
-m, −4.1 у x). Значит, часть просадки на крупных — это именно масштаб, а не разрезание.
-Тайлинг добавляет сверху ещё −7.6 (m) и −9.6 (x): объект шире 640 px физически не помещается
-в тайл, режется на куски, и куски плохо склеиваются NMS. Аугментация масштаба (±50 %) при
-обучении смягчает перекос, но не убирает. У yolo26x просадка на large при 1280 вдвое меньше,
-чем у m — большая модель устойчивее к масштабу.
+**Evidence from the data:** large objects also regress **at 1280, where there are no tiles at
+all** (−10.5 AP for m, −4.1 for x). So part of the large-object drop is the scale itself, not
+cutting. Tiling adds another −7.6 (m) and −9.6 (x) on top: an object wider than 640 px cannot fit
+into one tile, gets cut into pieces, and NMS merges the pieces poorly. Scale augmentation
+(±50 %) during training softens the mismatch but does not remove it. yolo26x's large-object drop
+at 1280 is half that of yolo26m — the bigger model is more robust to scale.
 
-**Почему 1280 обыгрывает тайлинг в среднем:** для 85 % кадров test-dev 1280 ≈ родное
-разрешение, так что пикселей у тайлинга почти не больше, зато: (1) кадр подаётся целиком —
-у модели есть контекст; (2) ничего не режется на стыках; (3) нет дублей на перекрытиях,
-которые надо склеивать; (4) один проход вместо 6–8.
+**Why 1280 beats tiling on average:** for 85 % of test-dev frames, 1280 ≈ native resolution, so
+tiling barely has more pixels, while 1280: (1) sees the whole frame — the model has context;
+(2) cuts nothing at seams; (3) has no duplicates on overlaps to merge; (4) needs one forward
+pass instead of 6–8.
 
 ---
 
-## 7. Проверка гипотез проекта
+## 7. Hypotheses check
 
-| Гипотеза (proposal) | Итог |
+| Hypothesis (proposal) | Verdict |
 |---|---|
-| И тайлинг, и 1280 поднимают recall на мелких объектах относительно 640 | ✅ **Подтверждена.** Recall tiny: +15…+18 пунктов, small: +10 у обоих режимов и обеих моделей. |
-| Тайлинг даёт наибольший выигрыш на самых маленьких объектах | ⚠️ **Частично.** По recall на tiny тайлинг впереди (+1.3…+1.9 к 1280), по AP на tiny — позади (−0.6…−1.3). Тайлинг обгоняет 1280 по AP на tiny только на кадрах ~1920 px (§5.5), где он реально даёт больше пикселей. |
-| Каждый выигрыш стоит измеримого времени | ✅ **Подтверждена.** 1280: ×3.3–3.7, тайлинг: ×7.2–8.1 (p95 до ×12). |
-| (вторичный вопрос) ёмкость модели помогает мелким объектам так же, как разрешение | ❌ **Нет.** x вместо m: +1.6…1.9 mAP; 1280 вместо 640: +3.8…4.1. На tiny при 640 ёмкость почти ничего не даёт (+0.26 AP). |
+| Both tiling and 1280 raise small-object recall over 640 | ✅ **Confirmed.** Tiny recall +15…+18 points, small +10, for both modes and both models. |
+| Tiling gains the most on the smallest objects | ⚠️ **Partially.** In tiny recall tiling leads (+1.3…+1.9 over 1280); in tiny AP it trails (−0.6…−1.3). Tiling beats 1280 in tiny AP only on ~1920 px frames (§5.5), where it actually adds pixels. |
+| Each gain comes at a measurable runtime cost | ✅ **Confirmed.** 1280: ×3.3–3.7, tiling: ×7.2–8.1 (p95 up to ×12). |
+| (secondary) Model capacity helps small objects as much as resolution | ❌ **No.** x instead of m: +1.6…1.9 mAP; 1280 instead of 640: +3.8…4.1. On tiny objects at 640, capacity gives almost nothing (+0.26 AP). |
 
 ---
 
-## 8. Разбор ошибок
+## 8. Failure analysis
 
-Три кадра выбраны детерминированно, без ручного отбора (`tiling.ipynb`, раздел 5):
-самый «людный» кадр, кадр с самым крупным объектом и первый кадр, где крупный объект пересекает
-границу тайла. Зелёное — разметка, красное — предсказания тайлинга с уверенностью ≥ 0.25,
-синее — границы тайлов; модель yolo26m.
+Three frames are selected deterministically, without cherry-picking (`tiling.ipynb`, section 5):
+the most crowded frame, the frame with the largest object, and the first frame where a large
+object crosses a tile boundary. Green = ground truth, red = tiling predictions with
+confidence ≥ 0.25, blue = tile boundaries; model yolo26m.
 
-### 8.1. Скопления крошечных объектов
+### 8.1. Crowds of tiny objects
 
-![Скопление tiny-объектов](figures/failure_crowding_tiny.png)
+![Crowd of tiny objects](figures/failure_crowding_tiny.png)
 
-`9999938_00000_d_0000207.jpg` (1400×788, **461 объект**). Машины на парковке и на дороге
-находятся почти все. Основные пропуски — пешеходы на площади и на тротуаре справа: фигуры в
-несколько пикселей, часто стоящие плотными группами, — много зелёных рамок без красной пары.
-Это главный тип ошибки во всех режимах: даже в лучшем режиме модель находит лишь ~41–47 %
-tiny-объектов. Здесь же видно, зачем был нужен общий лимит рамок: на таких кадрах старый лимит
-в 300 рамок на кадр (но не на тайл) давал тайлингу нечестное преимущество.
+`9999938_00000_d_0000207.jpg` (1400×788, **461 objects**). Cars in the parking lot and on the
+road are almost all found. The main misses are pedestrians on the square and on the sidewalk on
+the right — figures a few pixels high, often standing in dense groups — many green boxes without
+a red match. This is the dominant error type in every mode: even the best mode finds only
+~41–47 % of tiny objects. This frame also shows why the shared detection cap was needed: on such
+frames the old cap of 300 boxes per image (but not per tile) gave tiling an unfair advantage.
 
-### 8.2. Крупный объект, разрезанный тайлами (регрессия тайлинга)
+### 8.2. Large object cut by tiles (tiling regression)
 
-![Крупный объект](figures/failure_large_object.png)
+![Large object](figures/failure_large_object.png)
 
-`9999986_00000_d_0000043.jpg` (1400×1050). Фура в нижней левой части кадра шире тайла и
-пересекает две его границы — **тайлинг её не находит совсем** (нет красной рамки), хотя при 640
-такой объект — лёгкий случай. Рядом машина у края тайла получает смещённую рамку. Это и есть
-механизм обвала AP на large (−18 у m): объект не помещается в один тайл, а куски из разных
-тайлов не складываются в одну рамку.
+`9999986_00000_d_0000043.jpg` (1400×1050). The truck in the lower left is wider than a tile and
+crosses two tile boundaries — **tiling does not detect it at all** (no red box), although at 640
+such an object is an easy case. A car next to a tile edge gets a shifted box. This is the
+mechanism behind the large-object AP collapse (−18 for m): the object does not fit into one tile,
+and pieces from different tiles do not combine into one box.
 
-### 8.3. Объекты на границе тайлов
+### 8.3. Objects on tile boundaries
 
-![Граница тайла](figures/failure_tile_boundary.png)
+![Tile boundary](figures/failure_tile_boundary.png)
 
-`0000006_00611_d_0000002.jpg` (1360×765). Грузовики у верхнего левого края и справа вверху,
-пересекающие границы тайлов, получают **несколько рамок-обрывков** вместо одной; NMS их не
-сливает, если обрывки мало перекрываются. Это даёт одновременно ложные срабатывания (обрывок —
-не объект) и плохую локализацию. Машины целиком внутри тайла (центр кадра) обводятся
-правильно. Перекрытие 20–40 % это смягчает (§5.4), но не устраняет.
-
----
-
-## 9. Ограничения
-
-1. **Обучение только на 640** (по протоколу) — отсюда перекос масштаба (§6). Сравнение
-   честное для вопроса «что даёт смена входа при тех же весах», но не отвечает на вопрос
-   «как лучше обучать для каждого режима».
-2. **Один прогон**, без доверительных интервалов и разных seed; разницы < ~0.5 пункта — шум.
-3. **Полный train вместо «manageable subset»** из формулировки задания (proposal обосновывает
-   это тем, что подвыборка выбросила бы половину данных; на Kaggle полный train уложился в
-   ~8 ч).
-4. **Время измерено на Tesla T4**, батч 1, первые 200 кадров; абсолютные числа зависят от GPU,
-   соотношения между режимами — устойчивее.
-5. **val-метрики из логов обучения** считаются валидатором Ultralytics, не нашим оценщиком.
-6. **Числа 5-эпоховой стадии** в `docs/baseline_results.md` / `docs/tiling_results.md`
-   посчитаны до выравнивания лимита рамок — с этим отчётом их сравнивать только приблизительно.
-7. Группы кадров 960×540 и 1920×1080 в приложении малы (49 и 36 кадров).
+`0000006_00611_d_0000002.jpg` (1360×765). Trucks at the upper-left edge and in the upper right,
+crossing tile boundaries, get **several fragment boxes** instead of one; NMS does not merge them
+when the fragments overlap little. This produces both false positives (a fragment is not an
+object) and poor localisation. Cars fully inside a tile (frame centre) are outlined correctly.
+20–40 % overlap mitigates this (§5.4) but does not eliminate it.
 
 ---
 
-## 10. Что из этого следует и что можно сделать дальше
+## 9. Limitations
 
-- **Практический вывод:** для мелких объектов на VisDrone лучший компромисс — **полный кадр на
-  1280**; тайлинг оправдан только для кадров, заметно больших 1280 px, и если важен именно
-  recall на самых маленьких объектах.
-- **Обучение под режим инференса:** обучение на тайлах 640×640 из родного разрешения или
-  multi-scale/1280-обучение убрали бы перекос масштаба и, вероятно, обвал на large.
-- **Гибрид:** тайлинг + проход по целому кадру со слиянием (как в SAHI) — крупные объекты
-  берутся с полного кадра, мелкие — с тайлов.
-- **Адаптивный режим:** 1280 для кадров ≤ 1400 px, тайлинг — для ~1920 px (§5.5).
+1. **Training at 640 only** (by protocol) — hence the scale mismatch (§6). The comparison is fair
+   for "what does changing the input do with the same weights", but does not answer "how to
+   train best for each mode".
+2. **Single run**, no confidence intervals or multiple seeds; differences < ~0.5 points are noise.
+3. **Full train split instead of a "manageable subset"** from the task wording (the proposal
+   justifies this: a subset would discard half the data; on Kaggle full training fit into
+   ~8 h).
+4. **Runtime measured on a Tesla T4**, batch 1, first 200 images; absolute numbers depend on the
+   GPU, ratios between modes are more stable.
+5. **val metrics in the training logs** come from the Ultralytics validator, not our evaluator.
+6. **The 5-epoch stage-1 numbers** in `docs/baseline_results.md` / `docs/tiling_results.md` were
+   computed before the detection cap was equalised — compare them with this report only
+   approximately.
+7. The 960×540 and 1920×1080 groups in the appendix are small (49 and 36 images).
 
 ---
 
-## 11. Воспроизведение
+## 10. Takeaways and next steps
 
-| Шаг | Команда / файл | Результат |
+- **Practical conclusion:** for small objects on VisDrone, the best trade-off is **full-image
+  inference at 1280**; tiling pays off only for frames much larger than 1280 px and when recall on
+  the very smallest objects is what matters.
+- **Training matched to the inference mode:** training on 640×640 tiles at native resolution or
+  multi-scale/1280 training would remove the scale mismatch and likely the large-object collapse.
+- **Hybrid:** tiling + a full-image pass with merging (as in SAHI) — large objects from the full
+  frame, small ones from the tiles.
+- **Adaptive mode:** 1280 for frames ≤ 1400 px, tiling for ~1920 px frames (§5.5).
+
+---
+
+## 11. Reproduction
+
+| Step | Command / file | Output |
 |---|---|---|
-| Данные | `python scripts/prepare_data.py` | `data/` |
-| Обучение (Kaggle, 2× T4) | `bash scripts/kaggle_finetune.sh` | `runs/finetune/<model>_s640/weights/best.pt` |
-| Оценка (Kaggle, T4) | `bash scripts/kaggle_eval.sh` | `runs/{highres,tiling,results}/finetune/` |
-| Итоговые таблицы | `notebooks/results.ipynb` | `runs/results/finetune/results_tables.md` |
-| Сырые числа | [`results/metrics_all.csv`](../results/metrics_all.csv) | все метрики, 0–1 |
+| Data | `python scripts/prepare_data.py` | `data/` |
+| Training (Kaggle, 2× T4) | `bash scripts/kaggle_finetune.sh` | `runs/finetune/<model>_s640/weights/best.pt` |
+| Evaluation (Kaggle, T4) | `bash scripts/kaggle_eval.sh` | `runs/{highres,tiling,results}/finetune/` |
+| Final tables | `notebooks/results.ipynb` | `runs/results/finetune/results_tables.md` |
+| Raw numbers | [`results/metrics_all.csv`](../results/metrics_all.csv) | every metric, 0–1 |
+| Archive | `python scripts/pack_results.py` | report + all computed results (+ checkpoints with `--with-weights`) |
 
-Обучение заняло 3.2 ч (m) и 7.9 ч (x) параллельно на двух T4; полная оценка — 2.7 ч на одной
-T4 (из них ~1.6 ч — 640/1280 + приложение, ~1 ч — тайлинг, перебор перекрытия и разбор ошибок).
+Training took 3.2 h (m) and 7.9 h (x) in parallel on two T4s; the full evaluation took 2.7 h on
+one T4 (~1.6 h for 640/1280 + appendix, ~1 h for tiling, the overlap sweep and failure cases).

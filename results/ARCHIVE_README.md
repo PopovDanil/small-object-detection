@@ -1,114 +1,122 @@
-# Small-object detection on VisDrone — итоговые артефакты
+# Small-object detection on VisDrone — final artifacts
 
-Архив с результатами проекта **P17 Small-Object Detection in Aerial Images**: сравнение
-обычного сжатия кадра (640), инференса на повышенном разрешении (1280) и тайлинга
-(640×640 в родном разрешении, перекрытие 20 %) для YOLO26m и YOLO26x, дообученных на
-VisDrone2019-DET. Код: <https://github.com/PopovDanil/small-object-detection>.
+Results of project **P17 Small-Object Detection in Aerial Images**: standard resizing (640)
+vs higher-resolution inference (1280) vs tiling (640×640 crops at native resolution, 20 %
+overlap) for YOLO26m and YOLO26x fine-tuned on VisDrone2019-DET.
+Code: <https://github.com/PopovDanil/small-object-detection>.
 
-**С чего начать:** `report/results.md` — полный отчёт (таблицы, графики, выводы, разбор
-ошибок). Все числа в нём взяты из `experiments/metrics/metrics_all.csv`.
+**Start here:** `report/results.md` — the full report (tables, figures, conclusions, failure
+analysis). Every number in it comes from `experiments/metrics/metrics_all.csv`.
 
 ```
-report/                       итоговый отчёт
-  results.md                  отчёт (открывается в любом markdown-просмотрщике / на GitHub)
-  figures/                    картинки, на которые ссылается отчёт
-checkpoints/                  финальные веса (лучшая эпоха по val mAP50-95)
-  yolo26m_s640/best.pt        YOLO26m, 21.8 M параметров, 44 МБ
-  yolo26m_s640/args.yaml      точные аргументы обучения Ultralytics
-  yolo26x_s640/best.pt        YOLO26x, 58.8 M параметров, 118 МБ
+report/                       final report
+  results.md                  report (any markdown viewer / GitHub)
+  figures/                    images referenced by the report
+checkpoints/                  final weights (best epoch by val mAP50-95) — full archive only
+  yolo26m_s640/best.pt        YOLO26m, 21.8 M parameters, 44 MB
+  yolo26m_s640/args.yaml      exact Ultralytics training arguments
+  yolo26x_s640/best.pt        YOLO26x, 58.8 M parameters, 118 MB
   yolo26x_s640/args.yaml
-experiments/                  всё, что посчитано в экспериментах
-  metrics/                    ГЛАВНОЕ: все метрики голыми числами
-  conditions/                 сырые результаты каждого прогона оценки
-  training/                   логи и кривые обучения, пилот, конфиг
-  figures/                    все графики экспериментов
-  notebooks/                  выполненные ноутбуки (с выводом ячеек)
-README.md                     этот файл
+experiments/                  everything computed in the experiments
+  metrics/                    MAIN: every metric as raw numbers
+  conditions/                 raw output of each evaluation run
+  training/                   training logs and curves, pilot, config
+  figures/                    all experiment plots
+  notebooks/                  executed notebooks (with cell outputs)
+README.md                     this file
 ```
 
-## checkpoints/ — как использовать веса
+Two versions of the archive are built by `python scripts/pack_results.py`:
 
-Модели обучены на 10 классах VisDrone (id 0–9: pedestrian, people, bicycle, car, van, truck,
-tricycle, awning-tricycle, bus, motor) при `imgsz=640`, но работают на любом входе.
+| Archive | Checkpoints | Where |
+|---|---|---|
+| `small_object_detection_results.zip` | no (`args.yaml` only) | committed to git |
+| `small_object_detection_results_with_weights.zip` | yes (162 MB of weights) | kept out of git (GitHub rejects files > 100 MB); shared separately |
+
+## checkpoints/ — using the weights
+
+The models are trained on the 10 VisDrone classes (ids 0–9: pedestrian, people, bicycle, car,
+van, truck, tricycle, awning-tricycle, bus, motor) at `imgsz=640`, but accept any input size.
 
 ```python
 from ultralytics import YOLO  # ultralytics==8.4.175
 
 model = YOLO("checkpoints/yolo26m_s640/best.pt")
-model.predict("frame.jpg", imgsz=1280, conf=0.25, max_det=1000)   # лучший режим по отчёту
+model.predict("frame.jpg", imgsz=1280, conf=0.25, max_det=1000)   # best mode in the report
 ```
 
-Чтобы посчитать метрики тем же оценщиком, что в отчёте (из репозитория):
+To score them with the same evaluator as the report (from the repository):
 
 ```python
 from src.evaluation.metrics import evaluate_split, load_split_paths
 images, labels = load_split_paths("test")
 evaluate_split(labels, images, model, imgsz=1280)                       # 1280
-evaluate_split(labels, images, model, inference="tiled", overlap=0.20)  # тайлинг
+evaluate_split(labels, images, model, inference="tiled", overlap=0.20)  # tiling
 ```
 
-Либо положить папки `yolo26*_s640/` в `runs/finetune/` репозитория — ноутбуки
-`highres.ipynb` / `tiling.ipynb` / `results.ipynb` найдут их сами (`EVAL_STAGE=finetune`).
+Or put the `yolo26*_s640/` folders (with `best.pt` under `weights/`) into the repository's
+`runs/finetune/` — `highres.ipynb` / `tiling.ipynb` / `results.ipynb` find them automatically
+(`EVAL_STAGE=finetune`).
 
-## experiments/metrics/ — все метрики (test-dev, 1 610 кадров, 75 101 объект)
+## experiments/metrics/ — every metric (test-dev, 1,610 images, 75,101 objects)
 
-| Файл | Что внутри |
+| File | Content |
 |---|---|
-| `metrics_all.csv` | **все метрики, значения 0–1**, строка = модель × режим (`full-640`, `full-1280`, `tiled-ov20`; для yolo26m ещё `tiled-ov00`, `tiled-ov40`) |
-| `metrics_by_native_size.csv` | те же метрики отдельно по родному размеру кадра (6 групп: 960×540 … 1920×1080) |
-| `metrics_by_native_size_delta.csv` | разница каждого режима с 640 внутри группы кадров |
-| `results_tables.md` | итоговые таблицы 1–4 в markdown, значения ×100 |
-| `table1_overall.csv` | общие метрики + время, разница с 640 |
-| `table2_size_yolo26m.csv`, `table2_size_yolo26x.csv` | по размеру объектов (tiny / small / medium / large) |
-| `table3_capacity.csv` | yolo26x − yolo26m в каждом режиме |
-| `table4_overlap.csv` | перекрытие тайлов 0 / 20 / 40 % (yolo26m) |
+| `metrics_all.csv` | **every metric, values 0–1**, one row per model × mode (`full-640`, `full-1280`, `tiled-ov20`; for yolo26m also `tiled-ov00`, `tiled-ov40`) |
+| `metrics_by_native_size.csv` | the same metrics per native frame size (6 groups: 960×540 … 1920×1080) |
+| `metrics_by_native_size_delta.csv` | each mode minus 640 within each frame-size group |
+| `results_tables.md` | final Tables 1–4 in markdown, values ×100 |
+| `table1_overall.csv` | overall metrics + runtime, deltas vs 640 |
+| `table2_size_yolo26m.csv`, `table2_size_yolo26x.csv` | per object size (tiny / small / medium / large) |
+| `table3_capacity.csv` | yolo26x − yolo26m in each mode |
+| `table4_overlap.csv` | tile overlap 0 / 20 / 40 % (yolo26m) |
 
-Колонки `metrics_all.csv`:
+Columns of `metrics_all.csv`:
 
-| Колонка | Смысл |
+| Column | Meaning |
 |---|---|
-| `map50_95`, `map50` | COCO mAP при IoU 0.50:0.95 / 0.50 (conf 0.001, ≤1000 рамок на кадр) |
-| `recall50_25` | recall при IoU ≥ 0.5 и уверенности ≥ 0.25 |
-| `ap_<g>`, `ap50_<g>`, `recall_<g>`, `n_<g>` | то же по группе размеров `<g>` + число объектов |
-| `runtime_mean_ms`, `runtime_p95_ms` | мс на исходный кадр: Tesla T4, батч 1, 10 кадров прогрева, CUDA sync; для тайлинга — все тайлы + склейка; первые 200 кадров |
+| `map50_95`, `map50` | COCO mAP at IoU 0.50:0.95 / 0.50 (conf 0.001, ≤1000 detections per image) |
+| `recall50_25` | recall at IoU ≥ 0.5 and confidence ≥ 0.25 |
+| `ap_<g>`, `ap50_<g>`, `recall_<g>`, `n_<g>` | the same for size group `<g>` + object count |
+| `runtime_mean_ms`, `runtime_p95_ms` | ms per original image: Tesla T4, batch 1, 10 warm-up images, CUDA sync; tiling counts all tiles + merging; first 200 images |
 
-Группы размеров (площадь рамки в пикселях **исходного** кадра):
-`tiny` < 16², `small_only` 16²–32², `medium` 32²–96², `large` ≥ 96² — не пересекаются,
-в сумме дают все объекты (27 345 + 23 491 + 21 856 + 2 409 = 75 101). `small` (< 32²) —
-определение COCO (= tiny + small_only), оставлено для сравнения с литературой.
+Size groups (box area in **original**-image pixels): `tiny` < 16², `small_only` 16²–32²,
+`medium` 32²–96², `large` ≥ 96² — disjoint, summing to all objects
+(27,345 + 23,491 + 21,856 + 2,409 = 75,101). `small` (< 32²) is the COCO definition
+(= tiny + small_only), kept for comparability with the literature.
 
-## experiments/conditions/ — сырые результаты прогонов оценки
+## experiments/conditions/ — raw evaluation runs
 
-| Файл | Прогон |
+| File | Run |
 |---|---|
-| `full_640.csv`, `full_1280.csv` | полный кадр на 640 / 1280, обе модели (`highres.ipynb`) |
-| `tiled_ov00.csv`, `tiled_ov20.csv`, `tiled_ov40.csv` | тайлинг с перекрытием 0 / 20 / 40 % (`tiling.ipynb`; 0 и 40 % — только yolo26m) |
-| `tiling_overlap_sweep_yolo26m.csv` | три значения перекрытия в одной таблице |
-| `tiling_vs_baseline.csv` | тайлинг 20 % против 640 (из `tiling.ipynb`) |
+| `full_640.csv`, `full_1280.csv` | full image at 640 / 1280, both models (`highres.ipynb`) |
+| `tiled_ov00.csv`, `tiled_ov20.csv`, `tiled_ov40.csv` | tiling with 0 / 20 / 40 % overlap (`tiling.ipynb`; 0 and 40 % — yolo26m only) |
+| `tiling_overlap_sweep_yolo26m.csv` | the three overlaps in one table |
+| `tiling_vs_baseline.csv` | tiling 20 % vs 640 (from `tiling.ipynb`) |
 
-## experiments/training/ — обучение
+## experiments/training/ — training
 
-| Файл | Что внутри |
+| File | Content |
 |---|---|
-| `training_summary.csv` | эпох, лучшая эпоха, лучший val mAP50–95 / mAP50, батч, время (ч) |
-| `training_config.json` | общий конфиг обоих запусков + пиковая память пилота |
-| `pilot_result.json`, `pilot.log` | пилот выбора батча (yolo26x, 1 эпоха на 2 % train: батч 4/8/16) |
-| `yolo26m_s640/`, `yolo26x_s640/` | `results.csv` (метрики по эпохам на val), `args.yaml`, кривые P/R/F1/PR, confusion matrix, примеры батчей train/val |
-| `finetune_val_curves.png` | val mAP по эпохам для обеих моделей |
-| `yolo26m.log`, `yolo26x.log` | логи запусков на Kaggle |
+| `training_summary.csv` | epochs, best epoch, best val mAP50–95 / mAP50, batch, wall time (h) |
+| `training_config.json` | shared config of both runs + pilot peak memory |
+| `pilot_result.json`, `pilot.log` | batch-size pilot (yolo26x, 1 epoch on 2 % of train: batch 4/8/16) |
+| `yolo26m_s640/`, `yolo26x_s640/` | `results.csv` (per-epoch val metrics), `args.yaml`, P/R/F1/PR curves, confusion matrix, train/val batch samples |
+| `finetune_val_curves.png` | val mAP per epoch for both models |
+| `yolo26m.log`, `yolo26x.log` | Kaggle run logs |
 
-> val-метрики обучения считает валидатор Ultralytics (без учёта ignored regions, другой лимит
-> рамок) — их нельзя напрямую сравнивать с числами на test-dev.
+> Training val metrics come from the Ultralytics validator (ignored regions not respected,
+> different detection cap) and cannot be compared directly with the test-dev numbers.
 
-## experiments/figures/ и experiments/notebooks/
+## experiments/figures/ and experiments/notebooks/
 
-- `figures/`: точность против времени, изменение по размерам, перекрытие тайлов, сетка тайлов,
-  три случая разбора ошибок (скопление tiny-объектов, крупный объект, граница тайла).
-- `notebooks/`: выполненные `highres`, `tiling`, `results` (оценка) и `finetune_*` (обучение) —
-  с выводом всех ячеек, можно открыть и посмотреть без запуска.
+- `figures/`: accuracy vs runtime, change per object size, tile overlap, tile grid example,
+  three failure cases (crowd of tiny objects, large object, tile boundary).
+- `notebooks/`: executed `highres`, `tiling`, `results` (evaluation) and `finetune_*`
+  (training) — with all cell outputs, viewable without running.
 
-## Протокол в двух строках
+## Protocol in two lines
 
-Дообучение одно (640, 50 эпох, батч 16, seed 42, лучшая эпоха по val); три режима инференса
-на **одних и тех же** весах; один оценщик для всех режимов; val — только выбор эпохи, все
-числа — test-dev. Один прогон без доверительных интервалов: разницы < ~0.5 пункта — шум.
+One fine-tune per model (640, 50 epochs, batch 16, seed 42, best epoch on val); three inference
+modes on the **same** weights; one evaluator for all modes; val only for epoch selection, all
+numbers on test-dev. Single run without confidence intervals: differences < ~0.5 points are noise.

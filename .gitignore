@@ -228,5 +228,5 @@ runs/
 *.pt
 *.pth
 
-# Packed final artifacts (checkpoints inside; >100 MB, keep out of git)
-results/*.zip
+# Packed final artifacts with checkpoints (>100 MB, keep out of git)
+results/*_with_weights.zip
