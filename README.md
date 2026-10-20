@@ -4,7 +4,7 @@ Does tiled or higher-resolution inference improve small-object detection on aeri
 images compared with standard 640px resizing, and what is the accuracy–runtime
 trade-off? Full project definition: [docs/proposal.md](docs/proposal.md).
 
-**Results:** [docs/results.md](docs/results.md) / [PDF](docs/results.pdf) (final report) · raw numbers:
+**Results:** [docs/results.md](docs/results.md) / [PDF](docs/results.pdf) (report) · raw numbers:
 [results/metrics_all.csv](results/metrics_all.csv) ([column guide](results/README.md)).
 In short: 1280 full-image inference beats 640 by +3.8…4.1 mAP50–95 and roughly doubles
 recall on tiny objects at ×3.3–3.7 runtime; 640×640 tiling gives similar recall but only
@@ -132,7 +132,7 @@ baseline notebook), runs the pilot once and then trains `yolo26m` on GPU 0 and
 `yolo26x` on GPU 1 in parallel with the same batch. See
 [docs/finetuning.md](docs/finetuning.md).
 
-## Final evaluation (stage 2b): 640 / 1280 / tiling
+## Evaluation (stage 2b): 640 / 1280 / tiling
 
 All three inference conditions are scored on the **same checkpoints**. `EVAL_STAGE`
 (env var) selects them: `finetune` (default, `runs/finetune/`) or `baseline`
@@ -148,7 +148,7 @@ All three inference conditions are scored on the **same checkpoints**. `EVAL_STA
    with 20 % overlap, the 0/20/40 % overlap sensitivity sweep for `yolo26m` and
    failure cases (`evaluate_split(..., inference="tiled")`) → `runs/tiling/<stage>/`.
 3. [notebooks/results.ipynb](notebooks/results.ipynb) — no inference; merges the CSVs
-   into the final tables → `runs/results/<stage>/` (CSV, `results_tables.md`, PNG):
+   into the result tables → `runs/results/<stage>/` (CSV, `results_tables.md`, PNG):
    overall metrics + runtime with Δ vs 640, per disjoint object-size group (AP50–95,
    AP50, recall, counts), yolo26x − yolo26m per condition, overlap sweep.
 

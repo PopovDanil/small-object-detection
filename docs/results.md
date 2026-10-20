@@ -1,11 +1,11 @@
-# Final results: 640 vs 1280 vs tiling on VisDrone2019-DET
+# Report: 640 vs 1280 vs tiling on VisDrone2019-DET
 
-Final report of project **P17 Small-Object Detection in Aerial Images**: *"Compare standard
+Report of project **P17 Small-Object Detection in Aerial Images**: *"Compare standard
 resizing with tiling or higher-resolution inference. Report AP/recall, runtime, and failure
 cases involving very small objects."*
 
 All numbers are on VisDrone2019-DET **test-dev** (1,610 images, 75,101 objects), computed with
-the final weights after the full fine-tune (50 epochs) by one shared evaluator,
+the weights from the full fine-tune (50 epochs) by one shared evaluator,
 [`src/evaluation/metrics.py`](../src/evaluation/metrics.py). Raw numbers (0–1, every metric):
 [`results/metrics_all.csv`](../results/metrics_all.csv); column guide:
 [`results/README.md`](../results/README.md). The numbers follow our protocol and are not
@@ -72,7 +72,7 @@ them are not penalised).
 |---|---:|---:|---|
 | train | 6,471 | 343,197 | training the weights |
 | val | 548 | 38,759 | **only** best-epoch selection and early stopping |
-| test-dev | 1,610 | 75,101 | **only** the final numbers in this report |
+| test-dev | 1,610 | 75,101 | **only** the numbers in this report |
 
 No hyperparameters were tuned on val — they were fixed by the protocol in advance; the only
 value selected was the batch size (by GPU memory, not by accuracy; see §3).
@@ -434,7 +434,7 @@ object) and poor localisation. Cars fully inside a tile (frame centre) are outli
 | Data | `python scripts/prepare_data.py` | `data/` |
 | Training (Kaggle, 2× T4) | `bash scripts/kaggle_finetune.sh` | `runs/finetune/<model>_s640/weights/best.pt` |
 | Evaluation (Kaggle, T4) | `bash scripts/kaggle_eval.sh` | `runs/{highres,tiling,results}/finetune/` |
-| Final tables | `notebooks/results.ipynb` | `runs/results/finetune/results_tables.md` |
+| Result tables | `notebooks/results.ipynb` | `runs/results/finetune/results_tables.md` |
 | Raw numbers | [`results/metrics_all.csv`](../results/metrics_all.csv) | every metric, 0–1 |
 | Archive | `python scripts/pack_results.py` | report + all computed results (+ checkpoints with `--with-weights`) |
 

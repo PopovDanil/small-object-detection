@@ -1,4 +1,4 @@
-"""Pack the final artifacts into one zip: report, all computed results, optionally weights.
+"""Pack the project artifacts into one zip: report, all computed results, optionally weights.
 
 Reads ``runs/`` (fine-tune + evaluation outputs), ``results/`` and ``docs/results.md``;
 writes the layout described in ``results/ARCHIVE_README.md`` (copied into the archive as

@@ -1,4 +1,4 @@
-# Small-object detection on VisDrone — final artifacts
+# Small-object detection on VisDrone — report and results
 
 Results of project **P17 Small-Object Detection in Aerial Images**: standard resizing (640)
 vs higher-resolution inference (1280) vs tiling (640×640 crops at native resolution, 20 %
@@ -9,11 +9,11 @@ Code: <https://github.com/PopovDanil/small-object-detection>.
 analysis). Every number in it comes from `experiments/metrics/metrics_all.csv`.
 
 ```
-report/                       final report
+report/                       the report
   results.pdf                 report, PDF
   results.md                  the same report in markdown (any viewer / GitHub)
   figures/                    images referenced by the report
-checkpoints/                  final weights (best epoch by val mAP50-95) — full archive only
+checkpoints/                  weights (best epoch by val mAP50-95) — full archive only
   yolo26m_s640/best.pt        YOLO26m, 21.8 M parameters, 44 MB
   yolo26m_s640/args.yaml      exact Ultralytics training arguments
   yolo26x_s640/best.pt        YOLO26x, 58.8 M parameters, 118 MB
@@ -66,7 +66,7 @@ Or put the `yolo26*_s640/` folders (with `best.pt` under `weights/`) into the re
 | `metrics_all.csv` | **every metric, values 0–1**, one row per model × mode (`full-640`, `full-1280`, `tiled-ov20`; for yolo26m also `tiled-ov00`, `tiled-ov40`) |
 | `metrics_by_native_size.csv` | the same metrics per native frame size (6 groups: 960×540 … 1920×1080) |
 | `metrics_by_native_size_delta.csv` | each mode minus 640 within each frame-size group |
-| `results_tables.md` | final Tables 1–4 in markdown, values ×100 |
+| `results_tables.md` | Tables 1–4 in markdown, values ×100 |
 | `table1_overall.csv` | overall metrics + runtime, deltas vs 640 |
 | `table2_size_yolo26m.csv`, `table2_size_yolo26x.csv` | per object size (tiny / small / medium / large) |
 | `table3_capacity.csv` | yolo26x − yolo26m in each mode |

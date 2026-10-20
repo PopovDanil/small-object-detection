@@ -1,6 +1,6 @@
-# Final results — raw numbers
+# Results — raw numbers
 
-Final evaluation of the full fine-tune (`EVAL_STAGE=finetune`) on VisDrone2019-DET
+Evaluation of the full fine-tune (`EVAL_STAGE=finetune`) on VisDrone2019-DET
 **test-dev** (1,610 images, 75,101 objects), produced by `scripts/kaggle_eval.sh`
 (`highres.ipynb` → `tiling.ipynb` → `results.ipynb`) on a Kaggle Tesla T4. The written
 report with tables, figures and discussion is [docs/results.md](../docs/results.md).
