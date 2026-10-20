@@ -17,6 +17,13 @@ export EVAL_STAGE="${EVAL_STAGE:-finetune}"
 pip install -q "ultralytics==8.4.175" "pycocotools==2.0.11"
 python scripts/prepare_data.py
 
+# Kaggle: without FINETUNE_SRC, look for the fine-tune output attached as an input.
+if [[ -z "${FINETUNE_SRC:-}" && ! -f "runs/${EVAL_STAGE}/yolo26m_s640/weights/best.pt" ]]; then
+  found=$(find /kaggle/input -path "*/runs/${EVAL_STAGE}/yolo26m_s640/weights/best.pt" 2>/dev/null | head -n 1)
+  [[ -n "$found" ]] && FINETUNE_SRC=$(dirname "$(dirname "$(dirname "$found")")")
+  echo "FINETUNE_SRC=${FINETUNE_SRC:-<not found>}"
+fi
+
 if [[ -n "${FINETUNE_SRC:-}" ]]; then
   mkdir -p "runs/${EVAL_STAGE}"
   for model in yolo26m yolo26x; do
