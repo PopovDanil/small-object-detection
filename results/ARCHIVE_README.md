@@ -5,12 +5,13 @@ vs higher-resolution inference (1280) vs tiling (640×640 crops at native resolu
 overlap) for YOLO26m and YOLO26x fine-tuned on VisDrone2019-DET.
 Code: <https://github.com/PopovDanil/small-object-detection>.
 
-**Start here:** `report/results.md` — the full report (tables, figures, conclusions, failure
+**Start here:** `report/results.pdf` (or `report/results.md`) — the full report (tables, figures, conclusions, failure
 analysis). Every number in it comes from `experiments/metrics/metrics_all.csv`.
 
 ```
 report/                       final report
-  results.md                  report (any markdown viewer / GitHub)
+  results.pdf                 report, PDF
+  results.md                  the same report in markdown (any viewer / GitHub)
   figures/                    images referenced by the report
 checkpoints/                  final weights (best epoch by val mAP50-95) — full archive only
   yolo26m_s640/best.pt        YOLO26m, 21.8 M parameters, 44 MB

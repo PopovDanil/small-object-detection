@@ -30,6 +30,7 @@ def build_manifest(stage: str, with_weights: bool) -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = [
         (ROOT / "results" / "ARCHIVE_README.md", "README.md"),
         (ROOT / "docs" / "results.md", "report/results.md"),
+        (ROOT / "docs" / "results.pdf", "report/results.pdf"),
     ]
     entries += [(p, f"report/figures/{p.name}") for p in sorted((ROOT / "docs/figures").glob("*"))]
 
