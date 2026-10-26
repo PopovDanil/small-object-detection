@@ -113,6 +113,51 @@ responsible for...", no step-by-step duplication of the body.
 - Notebook outputs are not source; do not commit generated data, weights or run
   artifacts.
 
+## Git workflow
+
+Use Conventional Commits and short-lived branches off `main`.
+
+Branch names mirror the commit type:
+
+```text
+feat/tiling-overlap-sweep
+fix/highres-runtime-sync
+docs/agents-guidelines
+refactor/shared-evaluator
+```
+
+Keep one logical change per commit. Do not mix formatting, refactoring and behavior
+changes in the same commit.
+
+Commit messages:
+
+```text
+<type>(<scope>): <summary>
+
+<optional body: why the change is needed, wrapped at 72 columns>
+```
+
+- Types: `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`, `chore`.
+- Scopes are optional but useful here: `eval`, `data`, `training`, `inference`,
+  `notebooks`, `results`, `scripts`, `docs`.
+- Summary: imperative mood, lowercase, no trailing period, at most 72 characters.
+- Body: explain motivation and trade-offs, not a line-by-line restatement of the diff.
+- Breaking changes: add `!` after the type/scope and a `BREAKING CHANGE:` footer.
+- No generated-by or AI-attribution trailers, no emoji, no vague summaries such as
+  "update code" or "fix stuff".
+
+Examples:
+
+```text
+feat(eval): share MAX_DET across full-image and tiled inference
+fix(tiling): clip merged boxes to original image bounds
+docs(results): report overlap-sweep runtime
+```
+
+Before committing, inspect `git diff` and stage only the intended files. Do not commit
+generated data, weights, run artifacts or notebook outputs. Do not amend, force-push or
+commit unless explicitly asked.
+
 ## Assistant behavior
 
 - Prefer the smallest correct change. Do not add abstractions, wrappers, config flags or
