@@ -35,6 +35,56 @@ from scripts import manual_experiment as m
 from scripts.pack_manual_kaggle import build
 
 
+class CocoWeightsChecks(unittest.TestCase):
+    def test_both_models_accept_different_historical_training_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "coco_weights"
+            previous = Path.cwd()
+            for model in ("yolo26m", "yolo26x"):
+                for historical in (f"{model}.pt", "/historical/training/another_model.yaml"):
+                    with self.subTest(model=model, historical=historical):
+                        loaded = SimpleNamespace(
+                            task="detect",
+                            names=dict.fromkeys(range(80)),
+                            ckpt={"train_args": {"model": historical}},
+                        )
+                        loader = Mock(return_value=loaded)
+                        with (
+                            patch.dict(sys.modules, {"ultralytics": SimpleNamespace(YOLO=loader)}),
+                            patch.object(m, "Path", return_value=directory) as paths,
+                        ):
+                            paths.cwd.return_value = previous
+                            actual = m.coco_weights(model)
+                        self.assertEqual(actual, directory / f"{model}.pt")
+                        loader.assert_called_once_with(str(directory / f"{model}.pt"))
+                        self.assertEqual(Path.cwd(), previous)
+
+    def test_rejects_wrong_task_class_count_and_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "coco_weights"
+            previous = Path.cwd()
+            for model in ("yolo26m", "yolo26x"):
+                for task, count in (("classify", 80), ("detect", 10)):
+                    with self.subTest(model=model, task=task, classes=count):
+                        loader = Mock(return_value=SimpleNamespace(task=task, names=range(count)))
+                        with (
+                            patch.dict(sys.modules, {"ultralytics": SimpleNamespace(YOLO=loader)}),
+                            patch.object(m, "Path", return_value=directory) as paths,
+                        ):
+                            paths.cwd.return_value = previous
+                            with self.assertRaisesRegex(ValueError, "80-class COCO"):
+                                m.coco_weights(model)
+                        self.assertEqual(Path.cwd(), previous)
+            loader = Mock()
+            with (
+                patch.dict(sys.modules, {"ultralytics": SimpleNamespace(YOLO=loader)}),
+                patch.object(m, "Path", return_value=directory),
+                self.assertRaisesRegex(ValueError, "expected coco_weights directory"),
+            ):
+                m.coco_weights("../yolo26x")
+            loader.assert_not_called()
+
+
 class ManualChecks(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

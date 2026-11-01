@@ -305,6 +305,8 @@ def coco_weights(model):
     directory = Path("/kaggle/working/coco_weights")
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{model}.pt"
+    if path.resolve().parent != directory.resolve():
+        raise ValueError("COCO checkpoint must be loaded from the expected coco_weights directory.")
     # A separate directory prevents accidentally loading an attached VisDrone best.pt.
     previous = Path.cwd()
     try:
@@ -312,10 +314,7 @@ def coco_weights(model):
         loaded = YOLO(str(path))
     finally:
         os.chdir(previous)
-    if (
-        len(loaded.names) != 80
-        or Path(loaded.ckpt.get("train_args", {}).get("model", f"{model}.pt")).stem != model
-    ):
+    if loaded.task != "detect" or len(loaded.names) != 80:
         raise ValueError("Fresh runs require the official 80-class COCO checkpoint.")
     return path
 
