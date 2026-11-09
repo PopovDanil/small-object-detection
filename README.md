@@ -16,6 +16,13 @@ We fine-tune **YOLO26m** and **YOLO26x** (COCO-pretrained) on **VisDrone2019-DET
 conditions: 640 full-image baseline, 1280 full-image, and 640×640 tiling at native
 resolution with 20% overlap.
 
+## Kaggle experiments
+
+Open an experiment from [notebooks/kaggle](notebooks/kaggle) and follow the
+[Run All guide](MANUAL_KAGGLE_GUIDE.md). Build the small code Dataset ZIP with
+`python scripts/pack_manual_kaggle.py`; prepared VisDrone data is optional.
+Failure analysis also requires the original YOLO26m VisDrone checkpoint as an Input.
+
 ## Development setup
 
 Requirements: [uv](https://docs.astral.sh/uv/), Python 3.12 (managed by uv),
