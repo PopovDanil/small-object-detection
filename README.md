@@ -16,14 +16,7 @@ We fine-tune **YOLO26m** and **YOLO26x** (COCO-pretrained) on **VisDrone2019-DET
 conditions: 640 full-image baseline, 1280 full-image, and 640×640 tiling at native
 resolution with 20% overlap.
 
-## Kaggle experiments
-
-Open an experiment from [notebooks/kaggle](notebooks/kaggle) and follow the
-[Run All guide](MANUAL_KAGGLE_GUIDE.md). Build the small code Dataset ZIP with
-`python scripts/pack_manual_kaggle.py`; prepared VisDrone data is optional.
-Failure analysis also requires the original YOLO26m VisDrone checkpoint as an Input.
-
-## Development setup
+## Setup
 
 Requirements: [uv](https://docs.astral.sh/uv/), Python 3.12 (managed by uv),
 an NVIDIA GPU with recent drivers for training/inference.
@@ -37,6 +30,61 @@ uv run pre-commit install   # enable ruff + mypy hooks on every commit
 
 Run everything with `uv run ...` so the project environment is used, e.g.
 `uv run python -c "import torch; print(torch.cuda.is_available())"`.
+
+### Tests
+
+The test suite is CPU-only: it does not need VisDrone data, a GPU or model weights.
+It covers the manual Kaggle setup/backup/resume/export logic and executes all seven
+Run All notebooks with GPU commands mocked.
+
+```bash
+uv run python -m unittest discover -s tests -v   # full test suite
+uv run ruff check .                              # lint
+uv run ruff format --check .                     # formatting
+uv run mypy src                                  # type check
+```
+
+The tests use the standard-library `unittest` runner (pytest is not a project
+dependency). Run the suite before committing changes to the evaluator or scripts.
+
+### Model checkpoints
+
+* **COCO-pretrained weights** (`yolo26m.pt`, `yolo26x.pt`) are downloaded automatically
+  by Ultralytics on first use; `weights/yolo26n.pt` is only a local smoke-test model.
+* **Fine-tuned checkpoints** are produced by the fine-tune stage and written to
+  `runs/finetune/<model>_s640/weights/best.pt` (git-ignored).
+* `python scripts/pack_results.py --with-weights` packs both fine-tuned `best.pt`
+  files into a results archive; the committed archive excludes weights because
+  GitHub rejects files over 100 MB.
+
+### Test a checkpoint
+
+After preparing the data and training (or restoring) a checkpoint, verify that the
+model loads, has the expected ten classes, and scores on a small slice of test-dev:
+
+```bash
+uv run python - <<'PY'
+from pathlib import Path
+
+from ultralytics import YOLO
+
+from src.evaluation.metrics import CLASSES, evaluate_split, load_split_paths
+
+weights = Path("runs/finetune/yolo26m_s640/weights/best.pt")
+model = YOLO(str(weights))
+assert tuple(model.names.values()) == CLASSES, model.names
+
+images, labels = load_split_paths("test")
+scores = evaluate_split(
+    labels[:25], images[:25], model, imgsz=640, runtime_images=5, warmup=2
+)
+print({k: round(scores[k], 4) for k in ("map50_95", "map50", "recall50_25")})
+PY
+```
+
+Swap `imgsz=640` for `imgsz=1280`, or pass `inference="tiled", tile=640,
+overlap=0.2`, to smoke-test the other inference conditions. A full evaluation uses
+the whole test split and `runtime_images=200` (see below).
 
 ### Pre-commit hooks
 
@@ -54,6 +102,79 @@ uv run mypy src                     # type check only
 
 Dependencies are pinned/ranged in [pyproject.toml](pyproject.toml); lockfile: `uv.lock`
 (commit it whenever dependencies change).
+
+## Running experiments
+
+All stages share one prepared dataset, one training config and one evaluator. Run the
+notebooks from the repo root (they resolve paths relative to it):
+
+| Stage | Entry point | Output |
+|---|---|---|
+| Data | `python scripts/prepare_data.py` (data cells of the baseline notebook) | `data/` |
+| Stage 1: baseline | `notebooks/baseline.ipynb` | `runs/baseline/` |
+| Stage 2a: full fine-tune | `notebooks/finetune.ipynb` | `runs/finetune/` |
+| Stage 2b: 640 + 1280 | `notebooks/highres.ipynb` | `runs/highres/<stage>/` |
+| Stage 2b: tiling | `notebooks/tiling.ipynb` | `runs/tiling/<stage>/` |
+| Tables | `notebooks/results.ipynb` | `runs/results/<stage>/` |
+
+### Local / single GPU
+
+```bash
+# 0) prepare VisDrone once (download, YOLO conversion, manifests, visdrone.yaml)
+uv run python scripts/prepare_data.py
+
+# 1) stage 1: short 5-epoch baseline + vanilla COCO scores
+uv run jupyter nbconvert --to notebook --execute notebooks/baseline.ipynb \
+    --inplace --ExecutePreprocessor.timeout=-1
+
+# 2) stage 2a: full fine-tune (max 50 epochs; several hours per model)
+uv run jupyter nbconvert --to notebook --execute notebooks/finetune.ipynb \
+    --inplace --ExecutePreprocessor.timeout=-1
+
+# 3) stage 2b: score the same checkpoints at 640, 1280 and with tiling, then build tables
+for notebook in highres tiling results; do
+  EVAL_STAGE=finetune uv run jupyter nbconvert --to notebook --execute \
+    "notebooks/${notebook}.ipynb" --inplace --ExecutePreprocessor.timeout=-1
+done
+```
+
+Set `RUN_APPENDIX=0` to skip the optional per-native-size pass in `highres.ipynb`.
+Use `EVAL_STAGE=baseline` to evaluate the stage-1 checkpoints instead of the full
+fine-tune. `VISDRONE_DATA=/path/to/data` points the notebooks at a prepared dataset
+outside the repo.
+
+### Kaggle, 2× T4
+
+```bash
+bash scripts/kaggle_finetune.sh   # prepare data -> pilot -> train m/x in parallel
+
+FINETUNE_SRC=/kaggle/input/<finetune-output>/small-object-detection/runs/finetune \
+  bash scripts/kaggle_eval.sh      # highres -> tiling -> results
+```
+
+Session settings: *Accelerator = GPU T4 x2*, *Internet = On*. See
+[docs/finetuning.md](docs/finetuning.md) for the training protocol and
+[MANUAL_KAGGLE_GUIDE.md](MANUAL_KAGGLE_GUIDE.md) for pausing/resuming runs.
+
+### Manual Run All Kaggle experiments
+
+The seven notebooks in [notebooks/kaggle](notebooks/kaggle) run the extra seeds and
+resolutions (640 seeds 43–44 and 1280 seed 42 for both models, plus failure analysis)
+with one click. The original seed-42/640 runs come from `notebooks/finetune.ipynb`, or
+from `python scripts/manual_experiment.py train --experiment yolo26m_640_seed42`
+(`yolo26x_640_seed42` for the larger model) after Setup:
+
+1. Build the code-only Dataset ZIP:
+   `python scripts/pack_manual_kaggle.py` → `runs/manual_delivery/manual_kaggle_code.zip`.
+2. Upload it as a new Kaggle Dataset (or create a new version) and select it.
+3. Import the desired `notebooks/kaggle/*.ipynb`, attach the code Dataset under
+   **Add Input**, enable **Internet** and **GPU T4 x2**, then **Run All**.
+4. Download the Final Export ZIP before the session ends; manual backup/resume is
+   described in the [Run All guide](MANUAL_KAGGLE_GUIDE.md).
+
+Prepared VisDrone data is optional: Setup reuses a local/prepared dataset or prepares
+the official splits on CPU. Failure analysis (`01_failure_analysis.ipynb`) additionally
+needs the original YOLO26m VisDrone checkpoint as an Input.
 
 ## Data
 
