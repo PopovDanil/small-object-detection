@@ -22,7 +22,7 @@ Requirements: [uv](https://docs.astral.sh/uv/), Python 3.12 (managed by uv),
 an NVIDIA GPU with recent drivers for training/inference.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/PopovDanil/small-object-detection.git
 cd small-object-detection
 uv sync                  # installs all runtime + dev dependencies into .venv
 uv run pre-commit install   # enable ruff + mypy hooks on every commit
